@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""Local Streamlit dashboard for browsing outputs from the quant research pipeline."""
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+try:
+    import streamlit as st
+except ImportError:  # keep helper functions importable in minimal/test environments
+    st = None
+
+ROOT = Path(__file__).resolve().parent
+OUTPUT_DIR = ROOT / "outputs"
+PIPELINE_SCRIPT = ROOT / "run_research.py"
+
+
+def read_json(path: str | Path) -> dict[str, Any] | None:
+    """Read a JSON object if present; return None for an absent result file."""
+    source = Path(path)
+    if not source.exists():
+        return None
+    with source.open(encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, dict):
+        raise ValueError(f"Expected a JSON object in {source}")
+    return payload
+
+
+def read_csv(path: str | Path, *, date_index: bool = False) -> pd.DataFrame | None:
+    """Read an output CSV; return None when a step has not generated it yet."""
+    source = Path(path)
+    if not source.exists():
+        return None
+    if date_index:
+        frame = pd.read_csv(source, index_col=0, parse_dates=True)
+    else:
+        frame = pd.read_csv(source)
+    return frame
+
+
+def output_status(output_dir: str | Path = OUTPUT_DIR) -> dict[str, bool]:
+    """Return availability of key research artifacts."""
+    directory = Path(output_dir)
+    names = [
+        "analysis_metadata.json",
+        "portfolio_risk_summary.json",
+        "portfolio_risk_contributions.csv",
+        "backtest_summary.json",
+        "backtest_equity_curve.csv",
+        "strategy_validation_metadata.json",
+        "walk_forward_summary.json",
+        "research_report.md",
+    ]
+    return {name: (directory / name).is_file() for name in names}
+
+
+def make_pipeline_command(
+    *,
+    weights: str,
+    test_start: date | str,
+    benchmark: str = "SPY",
+    lookbacks: str = "63,126,252",
+    skip_recents: str = "5,21",
+    top_ns: str = "1,2,3",
+    backtest_lookback: int = 126,
+    backtest_skip_recent: int = 21,
+    backtest_top_n: int = 2,
+    train_window: int = 252,
+    test_window: int = 63,
+    transaction_cost_bps: float = 5.0,
+    slippage_bps: float = 5.0,
+    risk_free_rate: float = 0.0,
+    refresh: bool = False,
+    allow_stale_cache: bool = False,
+    skip_walk_forward: bool = False,
+) -> list[str]:
+    """Build a safe argv list; never uses shell=True."""
+    start = test_start.isoformat() if isinstance(test_start, date) else str(test_start)
+    command = [
+        sys.executable, str(PIPELINE_SCRIPT),
+        "--weights", weights,
+        "--test-start", start,
+        "--benchmark", benchmark,
+        "--lookbacks", lookbacks,
+        "--skip-recents", skip_recents,
+        "--top-ns", top_ns,
+        "--backtest-lookback", str(backtest_lookback),
+        "--backtest-skip-recent", str(backtest_skip_recent),
+        "--backtest-top-n", str(backtest_top_n),
+        "--train-window", str(train_window),
+        "--test-window", str(test_window),
+        "--transaction-cost-bps", str(transaction_cost_bps),
+        "--slippage-bps", str(slippage_bps),
+        "--risk-free-rate", str(risk_free_rate),
+    ]
+    if refresh:
+        command.append("--refresh")
+    if allow_stale_cache:
+        command.append("--allow-stale-cache")
+    if skip_walk_forward:
+        command.append("--skip-walk-forward")
+    return command
+
+
+def _pct(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return "N/A"
+    return f"{float(value) * 100:.2f}%"
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    return float(value)
+
+
+def main() -> None:
+    if st is None:
+        raise RuntimeError(
+            "Streamlit is not installed. Install optional dashboard dependencies with "
+            "'python -m pip install -r requirements-dashboard.txt'."
+        )
+    st.set_page_config(page_title="个人量化研究系统", page_icon="📈", layout="wide")
+    st.title("个人量化研究系统")
+    st.caption("本地研究面板 · 历史风险与策略验证 · 不执行真实交易")
+
+    status = output_status()
+    with st.sidebar:
+        st.header("运行研究")
+        st.caption("提交后会实际运行数据更新和量化分析脚本。首次下载行情需要网络。")
+        with st.form("research_run_form"):
+            weights = st.text_input("组合目标权重", value="", placeholder="GOOGL=0.60,SPY=0.40",
+                                    help="填写真实组合目标权重，程序会在计算时归一化。不要提交账户号码或其他秘密。")
+            benchmark = st.text_input("基准标的", value="SPY").strip().upper() or "SPY"
+            test_start = st.date_input("单次样本外起始日期", value=date(2023, 1, 1))
+            lookbacks = st.text_input("参数验证：回看窗口", value="63,126,252")
+            skips = st.text_input("参数验证：跳过近期窗口", value="5,21")
+            top_ns = st.text_input("参数验证：持仓数量", value="1,2,3")
+            train_window = st.number_input("Walk-forward 训练窗口（交易日）", min_value=20, max_value=2000, value=252)
+            test_window = st.number_input("Walk-forward 测试窗口（交易日）", min_value=10, max_value=500, value=63)
+            cost_bps = st.number_input("交易成本（基点）", min_value=0.0, max_value=1000.0, value=5.0, step=1.0)
+            slippage_bps = st.number_input("滑点（基点）", min_value=0.0, max_value=1000.0, value=5.0, step=1.0)
+            risk_free_rate = st.number_input("年化无风险利率（小数）", min_value=-0.5, max_value=1.0, value=0.0, step=0.005, format="%.3f")
+            refresh = st.checkbox("强制刷新所有行情", value=False)
+            allow_stale = st.checkbox("刷新失败时允许使用旧缓存", value=False,
+                                      help="仅在明确接受陈旧数据风险时勾选；报告会记录数据日期。")
+            skip_walk_forward = st.checkbox("跳过 Walk-forward", value=False,
+                                            help="仅当历史数据长度不足时考虑；报告不包含滚动样本外验证。")
+            submitted = st.form_submit_button("运行完整研究流程", type="primary", use_container_width=True)
+
+    if submitted:
+        if not weights.strip():
+            st.sidebar.error("请先填写组合权重，例如 GOOGL=0.60,SPY=0.40。")
+        else:
+            command = make_pipeline_command(
+                weights=weights.strip(), test_start=test_start, benchmark=benchmark,
+                lookbacks=lookbacks.strip(), skip_recents=skips.strip(), top_ns=top_ns.strip(),
+                train_window=int(train_window), test_window=int(test_window),
+                transaction_cost_bps=float(cost_bps), slippage_bps=float(slippage_bps),
+                risk_free_rate=float(risk_free_rate), refresh=refresh,
+                allow_stale_cache=allow_stale, skip_walk_forward=skip_walk_forward,
+            )
+            with st.spinner("正在运行研究流程；此过程可能需要下载行情数据…"):
+                try:
+                    result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False, timeout=900)
+                except subprocess.TimeoutExpired:
+                    st.error("研究流程超过 15 分钟，已停止等待。请在终端中检查数据下载或网络状态。")
+                else:
+                    if result.returncode == 0:
+                        st.success("研究流程完成，结果已写入 outputs/。")
+                        if result.stdout:
+                            st.code(result.stdout[-12000:], language="text")
+                        st.rerun()
+                    else:
+                        st.error(f"研究流程失败（退出码 {result.returncode}）。请检查错误信息；未生成成功状态报告。")
+                        if result.stdout:
+                            st.text("标准输出")
+                            st.code(result.stdout[-8000:], language="text")
+                        if result.stderr:
+                            st.text("错误信息")
+                            st.code(result.stderr[-12000:], language="text")
+
+    data_meta = read_json(OUTPUT_DIR / "analysis_metadata.json")
+    portfolio = read_json(OUTPUT_DIR / "portfolio_risk_summary.json")
+    backtest = read_json(OUTPUT_DIR / "backtest_summary.json")
+    validation = read_json(OUTPUT_DIR / "strategy_validation_metadata.json")
+    walk = read_json(OUTPUT_DIR / "walk_forward_summary.json")
+
+    if data_meta:
+        st.caption(
+            f"上次数据分析时间（UTC）：{data_meta.get('run_at_utc', '未知')} · "
+            f"数据截止日期：{data_meta.get('data_last_dates', {})}"
+        )
+    else:
+        st.info("尚无分析结果。请在左侧填写组合目标权重并运行研究流程，或先在终端运行 run_research.py。")
+
+    if portfolio:
+        st.subheader("组合风险概览")
+        a, b, c, d, e = st.columns(5)
+        a.metric("累计收益", _pct(portfolio.get("total_return")))
+        b.metric("年化收益", _pct(portfolio.get("annualized_return")))
+        c.metric("年化波动", _pct(portfolio.get("annualized_volatility")))
+        d.metric("最大回撤", _pct(portfolio.get("max_drawdown")))
+        e.metric("Sharpe", "N/A" if portfolio.get("sharpe_ratio") is None else f"{portfolio['sharpe_ratio']:.2f}")
+        st.caption(
+            f"统计区间：{portfolio.get('start_date', 'N/A')} — {portfolio.get('end_date', 'N/A')}；"
+            f"有效收益观测：{portfolio.get('observations', 'N/A')}"
+        )
+
+    overview_tab, risk_tab, backtest_tab, validation_tab, files_tab = st.tabs(
+        ["总览", "组合风险", "策略回测", "稳健性验证", "结果文件"]
+    )
+    with overview_tab:
+        if portfolio:
+            st.markdown("### 组合风险指标")
+            risk_table = pd.DataFrame([
+                {"指标": "累计收益", "数值": _pct(portfolio.get("total_return"))},
+                {"指标": "年化收益", "数值": _pct(portfolio.get("annualized_return"))},
+                {"指标": "年化波动", "数值": _pct(portfolio.get("annualized_volatility"))},
+                {"指标": "Sharpe", "数值": portfolio.get("sharpe_ratio")},
+                {"指标": "Sortino", "数值": portfolio.get("sortino_ratio")},
+                {"指标": "最大回撤", "数值": _pct(portfolio.get("max_drawdown"))},
+                {"指标": "历史单期 VaR", "数值": _pct(portfolio.get("historical_var_one_period"))},
+                {"指标": "历史单期 CVaR", "数值": _pct(portfolio.get("historical_cvar_one_period"))},
+            ])
+            st.dataframe(risk_table, hide_index=True, use_container_width=True)
+        if backtest:
+            s = backtest.get("strategy", {})
+            bm = backtest.get("benchmark", {})
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("### 动量基准策略")
+                st.write(f"区间：{backtest.get('start_date', 'N/A')} — {backtest.get('end_date', 'N/A')}")
+                st.write(f"策略累计收益：{_pct(s.get('total_return'))}")
+                st.write(f"基准累计收益：{_pct(bm.get('total_return'))}")
+                st.write(f"超额累计收益：{_pct(backtest.get('excess_total_return'))}")
+            with col2:
+                st.markdown("### 样本外验证")
+                if walk:
+                    st.write(f"成功滚动窗口：{walk.get('folds_successful', 0)} / {walk.get('folds_total', 0)}")
+                    st.write(f"样本外观测数：{walk.get('oos_observations', 0)}")
+                    st.write(f"样本外超额累计收益：{_pct(walk.get('out_of_sample_excess_total_return'))}")
+                elif validation:
+                    st.write(f"参数组合有效数：{validation.get('successful_combinations', 0)}")
+                    st.write(f"参数组合跳过数：{validation.get('skipped_combinations', 0)}")
+        if not portfolio and not backtest:
+            st.info("请先运行一次研究流程，页面会自动读取已生成的输出。")
+
+    with risk_tab:
+        contributions = read_csv(OUTPUT_DIR / "portfolio_risk_contributions.csv")
+        if contributions is not None:
+            st.markdown("### 各资产对组合波动的贡献")
+            st.dataframe(contributions, use_container_width=True)
+            if "percentage_of_portfolio_volatility" in contributions.columns:
+                plot = contributions.set_index(contributions.columns[0])[["percentage_of_portfolio_volatility"]]
+                st.bar_chart(plot)
+        rolling = read_csv(OUTPUT_DIR / "portfolio_rolling_risk.csv", date_index=True)
+        if rolling is not None and not rolling.empty:
+            st.markdown("### 滚动波动率与回撤")
+            for field in ("rolling_annualized_volatility", "rolling_max_drawdown"):
+                if field in rolling.columns:
+                    view = rolling.pivot_table(index=rolling.index, columns="window_observations", values=field)
+                    view.columns = [f"{int(col)} 日窗口" for col in view.columns]
+                    st.write("年化波动率" if field == "rolling_annualized_volatility" else "滚动最大回撤")
+                    st.line_chart(view)
+        drawdown = read_csv(OUTPUT_DIR / "portfolio_drawdown.csv", date_index=True)
+        if drawdown is not None and "drawdown" in drawdown.columns:
+            st.markdown("### 组合历史回撤")
+            st.area_chart(drawdown[["drawdown"]])
+        stress = read_csv(OUTPUT_DIR / "portfolio_stress_tests.csv", date_index=False)
+        if stress is not None:
+            st.markdown("### 压力情景")
+            st.dataframe(stress, use_container_width=True)
+        if contributions is None and rolling is None and drawdown is None:
+            st.info("组合风险输出尚不存在。运行研究流程后这里会显示风险贡献、滚动风险和回撤。")
+
+    with backtest_tab:
+        equity = read_csv(OUTPUT_DIR / "backtest_equity_curve.csv", date_index=True)
+        if equity is not None and not equity.empty:
+            st.markdown("### 策略与基准净值")
+            st.line_chart(equity)
+        daily = read_csv(OUTPUT_DIR / "backtest_daily_returns.csv", date_index=True)
+        if daily is not None:
+            st.markdown("### 每日策略收益与换手")
+            st.dataframe(daily.tail(100), use_container_width=True)
+            if "strategy_return" in daily.columns:
+                st.line_chart(daily[["strategy_return", "benchmark_return"]].cumsum())
+        applied = read_csv(OUTPUT_DIR / "backtest_applied_weights.csv", date_index=True)
+        if applied is not None:
+            st.markdown("### 各收益区间使用的目标权重")
+            st.line_chart(applied)
+        if equity is None and daily is None:
+            st.info("回测输出尚不存在。运行研究流程后这里会显示策略净值和每日表现。")
+
+    with validation_tab:
+        if validation:
+            st.markdown("### 参数验证概况")
+            x, y, z = st.columns(3)
+            x.metric("参数组合", int(validation.get("requested_combinations", 0)))
+            y.metric("有效组合", int(validation.get("successful_combinations", 0)))
+            z.metric("跳过组合", int(validation.get("skipped_combinations", 0)))
+        grid = read_csv(OUTPUT_DIR / "strategy_parameter_sweep.csv")
+        if grid is not None:
+            st.markdown("### 样本内 / 样本外参数网格")
+            st.dataframe(grid, use_container_width=True)
+        yearly = read_csv(OUTPUT_DIR / "strategy_yearly_performance.csv")
+        if yearly is not None:
+            st.markdown("### 逐年表现")
+            st.dataframe(yearly, use_container_width=True)
+        if walk:
+            st.markdown("### 滚动 Walk-forward 汇总")
+            st.json(walk)
+        folds = read_csv(OUTPUT_DIR / "walk_forward_folds.csv")
+        if folds is not None:
+            st.markdown("### 每轮参数选择与测试结果")
+            st.dataframe(folds, use_container_width=True)
+        oos = read_csv(OUTPUT_DIR / "walk_forward_oos_returns.csv", date_index=True)
+        if oos is not None and {"strategy_return", "benchmark_return"}.issubset(oos.columns):
+            st.markdown("### 样本外收益序列")
+            equity_oos = (1.0 + oos[["strategy_return", "benchmark_return"]]).cumprod()
+            equity_oos.columns = ["Walk-forward 策略", "基准"]
+            st.line_chart(equity_oos)
+        if grid is None and folds is None:
+            st.info("稳健性验证输出尚不存在。运行研究流程后这里会显示参数网格和 walk-forward 结果。")
+
+    with files_tab:
+        st.markdown("### 研究产物状态")
+        output_table = pd.DataFrame(
+            [{"文件": name, "存在": "是" if exists else "否"} for name, exists in status.items()]
+        )
+        st.dataframe(output_table, hide_index=True, use_container_width=True)
+        report_path = OUTPUT_DIR / "research_report.md"
+        if report_path.exists():
+            st.markdown("### 综合研究报告")
+            st.markdown(report_path.read_text(encoding="utf-8"))
+        st.markdown("### 输出目录")
+        st.code(str(OUTPUT_DIR), language="text")
+        st.caption("此面板仅读取本地研究文件；它不连接券商、不发送真实订单。公开部署前应增加身份认证和访问控制。")
+
+
+if __name__ == "__main__":
+    main()
