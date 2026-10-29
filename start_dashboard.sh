@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "\${BASH_SOURCE[0]}")"
-PYTHON_BIN="\${PYTHON_BIN:-python3}"
+cd "$(dirname "$0")"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 if [[ ! -x ".venv/bin/python" ]]; then
   "$PYTHON_BIN" -m venv .venv
