@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+.env
+
+# Notebook
+.ipynb_checkpoints/
+
+# Local market data and generated reports
+data/raw/*.csv
+outputs/*.csv
+outputs/*.png
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
