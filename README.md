@@ -11,6 +11,7 @@
 - 计算组合总收益、年化收益/波动率、Sharpe、Sortino、最大回撤、历史 VaR/CVaR，以及各持仓对组合波动率的贡献。
 - 提供横截面动量 v1 策略、单期信号滞后、基准对比、交易成本/滑点假设和可复现回测输出。
 - 支持参数网格实验、样本内/样本外指标分离，以及按自然年拆分的策略表现审查。
+- 支持滚动 walk-forward：每个测试窗口只用之前的训练窗口选择参数，并输出连续、互不重叠的样本外收益序列。
 - 计算 20/60/120 个观测窗口的滚动波动率和回撤，并支持自定义压力情景。
 - 输出相关矩阵及每一对资产的共同观测数量。
 - 输出最大回撤的峰值/谷值/恢复日期，以及每次分析的数据截止时间。
@@ -31,12 +32,14 @@
     ├── portfolio_risk.py
     ├── backtest_engine.py
     ├── strategy_validation.py
+    ├── walk_forward_validation.py
     ├── tests/
     │   ├── test_phase1_risk_analysis.py
     │   ├── test_position_scenarios.py
     │   ├── test_portfolio_risk.py
     │   ├── test_backtest_engine.py
-    │   └── test_strategy_validation.py
+    │   ├── test_strategy_validation.py
+    │   └── test_walk_forward_validation.py
     ├── .github/workflows/tests.yml
     ├── data/raw/       # 本地行情缓存；CSV 默认不提交
     └── outputs/        # 运行后生成的表格与图片；默认不提交
@@ -125,6 +128,9 @@ python phase1_risk_analysis.py --allow-stale-cache
 | `outputs/strategy_parameter_sweep.csv` | 不同参数下的样本内、样本外收益风险表现 |
 | `outputs/strategy_yearly_performance.csv` | 各参数下逐自然年的策略与基准表现 |
 | `outputs/strategy_validation_metadata.json` | 测试期起点、参数网格规模及跳过组合数量 |
+| `outputs/walk_forward_folds.csv` | 每轮训练区间、测试区间、训练选出的参数及样本外结果 |
+| `outputs/walk_forward_oos_returns.csv` | 各轮拼接后的非重叠样本外收益序列 |
+| `outputs/walk_forward_summary.json` | walk-forward 总体样本外表现和验证口径 |
 
 ## 组合风险分析
 
@@ -177,6 +183,22 @@ python strategy_validation.py \
 ```
 
 程序会报告所有参数组合，不会自动选出“最优参数”。建议先依据训练期设定参数，再把测试期作为未参与挑选的评估区间；测试期结果一旦被反复用于选参数，就不再是真正独立的样本外证据。当前模块是单次时间切分和逐年报告，后续仍需加入滚动 walk-forward、更多资产池和策略失效条件审查。
+
+## 滚动 Walk-forward 验证
+
+单次样本外切分仍可能受到选定日期的影响。滚动验证会在每轮中使用过去的训练窗口选择参数，并仅在紧随其后的测试窗口报告结果；测试窗口长度和训练窗口都以对齐后的收益观测数计。
+
+```bash
+python walk_forward_validation.py \
+  --lookbacks 63,126,252 \
+  --skip-recents 5,21 \
+  --top-ns 1,2,3 \
+  --train-window 252 \
+  --test-window 63 \
+  --selection-metric sharpe_ratio
+```
+
+当前版本要求至少有一整个训练窗口和一个测试窗口的共同收益历史；所有测试窗口不重叠。每轮以训练期指定指标选择参数，再输出后续测试期的策略和基准表现。多轮 walk-forward 仍不能消除多重试验、市场状态变化和幸存者偏差；建议保留额外未触碰的最终留出区间。
 
 ## 计算口径与局限
 
@@ -248,11 +270,11 @@ python -m pytest -q
 
 1. **数据与组合风险**：已实现行情质量检查、组合风险贡献、滚动风险和压力测试。
 2. **策略回测 v1**：已实现横截面动量基线、信号滞后、基准比较及初步交易成本估算。
-3. **策略验证 v1**：已实现参数网格、样本内/样本外拆分和逐年表现；下一步提升为滚动 walk-forward 与更完整的过拟合审计。
+3. **滚动策略验证**：已增加 walk-forward 训练/测试切分，后续继续完善过拟合审计和策略对照。
 4. **现实交易约束**：完善持仓权重漂移、成交价格、再平衡频率和最终平仓成本。
 5. **研究质量控制**：加入更多市场阶段、资产池与策略对照，记录实验参数并检查幸存者偏差和多重试验。
 6. **资产配置与持续监控**：组合约束优化、定时报告、异常检测和风险提醒。
-7. **模拟运行评估**：先纸面运行，并明确规则失效条件和风险预算；未完成审计前不接实盘交易接口。
+7. **研究报告与模拟运行**：自动汇总结果后先纸面运行，并明确规则失效条件和风险预算；未完成审计前不接实盘交易接口。
 
 ---
 
