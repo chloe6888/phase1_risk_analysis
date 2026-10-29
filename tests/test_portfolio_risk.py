@@ -165,3 +165,24 @@ def test_drawdown_includes_initial_capital_and_peak_before_trough() -> None:
     assert summary["max_drawdown"] == pytest.approx(-0.20)
     assert summary["max_drawdown_peak_date"] == "2024-01-02"
     assert summary["max_drawdown_trough_date"] == "2024-01-02"
+
+
+def test_cli_serializes_constant_return_series_without_nan_json(tmp_path) -> None:
+    prices_path = tmp_path / "flat_prices.csv"
+    pd.DataFrame(
+        {"AAA": [100.0, 100.0, 100.0, 100.0]},
+        index=pd.bdate_range("2024-01-01", periods=4),
+    ).to_csv(prices_path)
+    output_dir = tmp_path / "flat_output"
+    subprocess.run(
+        [
+            sys.executable, str(app.ROOT / "portfolio_risk.py"),
+            "--prices", str(prices_path), "--weights", "AAA=1",
+            "--output-dir", str(output_dir), "--window", "2",
+        ],
+        check=True, capture_output=True, text=True,
+    )
+    summary = json.loads((output_dir / "portfolio_risk_summary.json").read_text())
+    assert summary["annualized_return"] == pytest.approx(0.0)
+    assert summary["sharpe_ratio"] is None
+    assert summary["sortino_ratio"] is None
