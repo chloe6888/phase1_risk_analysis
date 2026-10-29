@@ -95,6 +95,13 @@ def render_report(
             f"- Largest position: {holdings_summary.get('largest_position_ticker', 'N/A')} ({fmt_pct(float(holdings_summary.get('largest_position_weight_pct', 0.0)) / 100.0)})",
             f"- Largest risk group: {holdings_summary.get('largest_risk_group', 'N/A')} ({fmt_pct(float(holdings_summary.get('largest_risk_group_weight_pct', 0.0)) / 100.0)})", "",
         ]
+        theme_exposures = holdings_summary.get("risk_group_exposures_pct", {})
+        subgroup_exposures = holdings_summary.get("subgroup_exposures_pct", {})
+        if theme_exposures:
+            lines.append("- Risk theme exposure: " + "; ".join(f"{name}: {float(weight):.1f}%" for name, weight in theme_exposures.items()))
+        if subgroup_exposures:
+            lines.append("- Industry exposure: " + "; ".join(f"{name}: {float(weight):.1f}%" for name, weight in subgroup_exposures.items()))
+        lines.append("")
         if holdings_reconciliation:
             lines.extend([
                 "### Snapshot reconciliation", "",
@@ -111,7 +118,7 @@ def render_report(
             lines.extend(["- No position/group concentration threshold was breached in the imported holdings snapshot.", ""])
         lines.extend([
             "Weights are calculated among imported equity/ETF positions only; cash, bonds, other accounts, FX liabilities, and margin financing are not included unless separately imported.",
-            "Latest adjusted closes are historical valuation references, not live executable quotes. Confirm every share quantity and latest-price date before acting.", "",
+            "Latest raw closes are historical valuation references, not live executable quotes. Confirm every share quantity and latest-price date before acting.", "",
         ])
     if portfolio:
         lines += [
@@ -122,6 +129,7 @@ def render_report(
             f"| Historical one-period VaR | {fmt_pct(portfolio.get('historical_var_one_period'))} |",
             f"| Historical one-period CVaR | {fmt_pct(portfolio.get('historical_cvar_one_period'))} |", "",
             "VaR/CVaR are historical one-period estimates, not maximum-loss guarantees.", "",
+            *(["Warning: fewer than 252 common return observations; annualized portfolio risk estimates are based on a short history."] if int(portfolio.get("observations", 0)) < 252 else []),
         ]
     if backtest:
         strategy, base = backtest.get("strategy", {}), backtest.get("benchmark", {})
