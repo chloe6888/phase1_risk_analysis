@@ -51,7 +51,7 @@ def test_render_report_combines_risk_backtest_and_validation() -> None:
     assert "Parameter sensitivity" in report
     assert "Rolling walk-forward evaluation" in report
     assert "Historical one-period VaR" in report
-    assert "does not execute trades" in report
+    assert "does not place trades" in report
     assert "25.00%" in report
 
 
