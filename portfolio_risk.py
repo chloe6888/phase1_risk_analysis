@@ -345,13 +345,41 @@ def main() -> None:
         risk_free_rate_annual=args.risk_free_rate,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    daily_returns_count = int(daily_returns["portfolio_return"].notna().sum())
+    if args.windows:
+        rolling_windows = tuple(args.windows)
+    else:
+        rolling_windows = tuple(window for window in (20, 60, 120) if window <= daily_returns_count)
+    if rolling_windows:
+        rolling = calculate_rolling_risk(
+            daily_returns["portfolio_return"], rolling_windows
+        )
+        summary["rolling_windows_used"] = list(rolling_windows)
+        summary["rolling_risk_note"] = (
+            "Rolling windows are limited to those supported by the available common-return history."
+        )
+    else:
+        rolling = pd.DataFrame(
+            columns=[
+                "window_observations",
+                "rolling_annualized_volatility",
+                "rolling_max_drawdown",
+            ]
+        )
+        rolling.index.name = "Date"
+        summary["rolling_windows_used"] = []
+        summary["rolling_risk_note"] = (
+            f"Only {daily_returns_count} common-return observations are available; "
+            "at least 20 are needed for the default rolling-risk chart. "
+            "Portfolio summary metrics are still calculated, but short-history estimates are unstable."
+        )
+        print("Warning: insufficient common-return history for default rolling-risk windows.", flush=True)
     (args.output_dir / "portfolio_risk_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8"
     )
     contributions.to_csv(args.output_dir / "portfolio_risk_contributions.csv", float_format="%.10f")
     drawdown.to_csv(args.output_dir / "portfolio_drawdown.csv", float_format="%.10f")
     daily_returns.to_csv(args.output_dir / "portfolio_daily_returns.csv", float_format="%.10f")
-    rolling = calculate_rolling_risk(daily_returns["portfolio_return"], args.windows or (20, 60, 120))
     rolling.to_csv(args.output_dir / "portfolio_rolling_risk.csv", float_format="%.10f")
     if args.scenario:
         scenario_dict: dict[str, dict[str, float]] = {}

@@ -186,3 +186,29 @@ def test_cli_serializes_constant_return_series_without_nan_json(tmp_path) -> Non
     assert summary["annualized_return"] == pytest.approx(0.0)
     assert summary["sharpe_ratio"] is None
     assert summary["sortino_ratio"] is None
+
+
+def test_cli_does_not_fail_when_default_rolling_windows_exceed_short_history(tmp_path) -> None:
+    prices_path = tmp_path / "short_prices.csv"
+    pd.DataFrame(
+        {
+            "AAA": [100, 101, 99, 102, 101, 103, 104],
+            "BBB": [100, 99, 101, 102, 100, 101, 103],
+        },
+        index=pd.bdate_range("2026-07-01", periods=7),
+    ).to_csv(prices_path)
+    output_dir = tmp_path / "short_output"
+    result = subprocess.run(
+        [
+            sys.executable, str(app.ROOT / "portfolio_risk.py"),
+            "--prices", str(prices_path), "--weights", "AAA=0.5,BBB=0.5",
+            "--output-dir", str(output_dir),
+        ],
+        check=True, capture_output=True, text=True,
+    )
+    summary = json.loads((output_dir / "portfolio_risk_summary.json").read_text())
+    assert summary["observations"] == 6
+    assert summary["rolling_windows_used"] == []
+    assert "Only 6 common-return observations" in summary["rolling_risk_note"]
+    assert (output_dir / "portfolio_rolling_risk.csv").exists()
+    assert "insufficient common-return history" in result.stdout.lower()
