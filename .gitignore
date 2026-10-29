@@ -11,12 +11,15 @@ venv/
 # Notebook runtime artifacts
 .ipynb_checkpoints/
 
+# User-specific financial data must never be committed to the public repository
+data/private/*
+!data/private/.gitkeep
+
 # Downloaded market data and generated analysis outputs (keep directory placeholders)
 data/raw/*.csv
 data/raw/*.meta.json
-outputs/*.csv
-outputs/*.png
-outputs/*.json
+outputs/*
+!outputs/.gitkeep
 
 # OS / editor files
 .DS_Store
