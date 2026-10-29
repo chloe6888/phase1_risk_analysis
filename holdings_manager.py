@@ -131,11 +131,11 @@ def summarize_holdings(
 
 def weights_from_price_panel(
     holdings: pd.DataFrame,
-    adjusted_close: pd.DataFrame,
+    price_panel: pd.DataFrame,
     *,
     max_staleness_calendar_days: int = 7,
 ) -> tuple[dict[str, float], pd.DataFrame]:
-    """Use each held ticker's last valid adjusted close to calculate portfolio weights.
+    """Use each held ticker's last valid raw close to calculate market-value portfolio weights.
 
     Different tickers can have different latest dates if their market calendars
     differ; last-price dates are returned explicitly and stale observations are
@@ -143,14 +143,14 @@ def weights_from_price_panel(
     """
     if max_staleness_calendar_days < 0:
         raise ValueError("max_staleness_calendar_days cannot be negative.")
-    if adjusted_close.empty or adjusted_close.index.has_duplicates:
+    if price_panel.empty or price_panel.index.has_duplicates:
         raise ValueError("Adjusted-close panel must be non-empty with unique dates.")
-    prices = adjusted_close.copy()
+    prices = price_panel.copy()
     prices.index = pd.to_datetime(prices.index)
     panel_end = pd.Timestamp(prices.index.max())
     unknown = sorted(set(holdings["ticker"]) - set(prices.columns))
     if unknown:
-        raise ValueError(f"Holdings tickers absent from adjusted-close panel: {unknown}")
+        raise ValueError(f"Holdings tickers absent from close-price panel: {unknown}")
     rows: list[dict[str, object]] = []
     for row in holdings.itertuples(index=False):
         series = pd.to_numeric(prices[row.ticker], errors="coerce").dropna()
@@ -159,7 +159,7 @@ def weights_from_price_panel(
         price_date = pd.Timestamp(series.index.max())
         price = float(series.iloc[-1])
         if not np.isfinite(price) or price <= 0:
-            raise ValueError(f"{row.ticker}: last adjusted close must be finite and positive.")
+            raise ValueError(f"{row.ticker}: last raw close must be finite and positive.")
         age_days = (panel_end.normalize() - price_date.normalize()).days
         if age_days > max_staleness_calendar_days:
             raise ValueError(
