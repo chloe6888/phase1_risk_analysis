@@ -65,3 +65,12 @@ def test_make_pipeline_command_builds_argv_without_shell_interpolation() -> None
         test_start="2023-01-01",
     )
     assert crafted[crafted.index("--weights") + 1] == "GOOGL=0.6; touch /tmp/should-not-exist"
+
+
+def test_streamlit_dashboard_initializes_without_existing_outputs() -> None:
+    from streamlit.testing.v1 import AppTest
+
+    page = AppTest.from_file(str(app.ROOT / "dashboard.py"), default_timeout=20).run()
+    assert not page.exception
+    assert page.title
+    assert page.title[0].value == "个人量化研究系统"
