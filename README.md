@@ -40,6 +40,8 @@
     ├── dashboard.py
     ├── holdings_manager.py
     ├── requirements-dashboard.txt
+    ├── start_dashboard.sh
+    ├── start_dashboard.ps1
     ├── tests/
     │   ├── test_phase1_risk_analysis.py
     │   ├── test_position_scenarios.py
@@ -237,8 +239,11 @@ python run_research.py \
 安装可选依赖后，在项目根目录运行：
 
 ```bash
-python -m pip install -r requirements-dashboard.txt
-python -m streamlit run dashboard.py
+# macOS / Linux
+bash start_dashboard.sh
+
+# Windows PowerShell
+.\start_dashboard.ps1
 ```
 
 仪表盘从 `outputs/` 读取已有结果；可在侧边栏上传个人持仓 CSV，文件会保存在已忽略的 `data/private/` 文件夹。勾选“使用导入持仓自动计算组合权重”后即可启动完整研究流程，也可手工填写权重。它默认仅用于本机交互，不执行真实交易，也不会因为打开页面就自动下载行情。请不要将本地服务直接暴露到公网；若需要多人或公网访问，必须先部署身份认证、授权与数据隔离。
