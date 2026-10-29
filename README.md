@@ -25,7 +25,8 @@
     ├── phase1_risk_analysis.py
     ├── position_scenarios.py
     ├── tests/
-    │   └── test_phase1_risk_analysis.py
+    │   ├── test_phase1_risk_analysis.py
+    │   └── test_position_scenarios.py
     ├── .github/workflows/tests.yml
     ├── data/raw/       # 本地行情缓存；CSV 默认不提交
     └── outputs/        # 运行后生成的表格与图片；默认不提交
@@ -88,6 +89,7 @@ python phase1_risk_analysis.py --allow-stale-cache
 | 文件 | 内容 |
 |---|---|
 | `data/raw/<TICKER>_daily.csv` | 各标的整理后的行情缓存，包含可用 OHLCV 和公司行为字段 |
+| `data/raw/<TICKER>_daily.meta.json` | 缓存来源、请求日期范围、下载时间、有效数据起止日和行数 |
 | `data/raw/adjusted_close_panel.csv` | 调整收盘价面板 |
 | `outputs/data_quality_report.csv` | 数据完整性摘要 |
 | `outputs/daily_returns.csv` | 调整收盘价计算的日收益率 |
@@ -132,24 +134,27 @@ python position_scenarios.py \
 命令中的价格和持仓数量均为虚构示例，运行前请替换为最新可核验的报价和自己的持仓数据。指定 `--history-csv` 时，CSV 需包含 `Date` 索引以及 `Close` 或 `Adj Close` 列。程序会输出 CSV 至 `outputs/`。
 
 
-### 五批累计计划与风险预算
+## 五批累计计划与风险预算
 
-若要分析连续执行的多批加仓，使用 \`--staged-prices\` 与 \`--staged-shares\`。程序会按批次累计股数、成本均价、现金投入和压力价格下的盈亏。可以用 \`--max-add-cash\` 和 \`--max-total-shares\` 设置硬约束；超过限制时，累计计划会报错而不是继续给出可执行计划。
+连续执行的多批加仓请使用 `--staged-prices` 与 `--staged-shares`。程序会按批次累计股数、成本均价、现金投入和压力价格下的盈亏。
 
-\`\`\`bash
-python position_scenarios.py \\
-  --ticker GOOGL \\
-  --shares 13 \\
-  --avg-cost 306 \\
-  --price 290 \\
-  --staged-prices 290 280 268 255 240 \\
-  --staged-shares 2 2 2 3 3 \\
-  --stress-prices 267.67 255 240 220 \\
-  --max-add-cash 3200 \\
-  --max-total-shares 25
-\`\`\`
+可以用 `--max-add-cash` 和 `--max-total-shares` 设置资金及持股上限；超过限制时会拒绝该累计计划。还可使用 `--max-stress-loss-pct 0.10` 限制所给压力价格下的损失不超过成本基数的 10%。设置该项时必须同时提供 `--stress-prices`；若计划不满足压力损失限制，程序会拒绝累计计划。独立情景会在结果表中标出违规项目。
 
-以上数值只是说明命令格式的假设情景，并非当前报价或买入建议。独立的价格/股数对照仍可使用 \`--levels\` 与 \`--add-shares\`，它们的每一行彼此独立，不应误解为按顺序执行的累计计划。
+```bash
+python position_scenarios.py \
+  --ticker GOOGL \
+  --shares 13 \
+  --avg-cost 306 \
+  --price 290 \
+  --staged-prices 290 280 268 255 240 \
+  --staged-shares 2 2 2 3 3 \
+  --stress-prices 267.67 255 240 220 \
+  --max-add-cash 3200 \
+  --max-total-shares 25 \
+  --max-stress-loss-pct 0.10
+```
+
+命令中的行情和持仓数字只是规划示例，并非当前报价或买入建议。独立情景仍使用 `--levels` 与 `--add-shares`；这两项生成的是彼此独立的情景，不是按顺序执行的累计计划。
 
 ## 自动化测试
 
