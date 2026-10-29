@@ -114,7 +114,8 @@ python phase1_risk_analysis.py --allow-stale-cache
 |---|---|
 | `data/raw/<TICKER>_daily.csv` | 各标的整理后的行情缓存，包含可用 OHLCV 和公司行为字段 |
 | `data/raw/<TICKER>_daily.meta.json` | 缓存来源、请求日期范围、下载时间、有效数据起止日和行数 |
-| `data/raw/adjusted_close_panel.csv` | 调整收盘价面板 |
+| `data/raw/adjusted_close_panel.csv` | 历史总收益风险分析使用的调整收盘价面板 |
+| `data/raw/close_price_panel.csv` | 按实际持股数量估值使用的未调整收盘价面板 |
 | `outputs/data_quality_report.csv` | 数据完整性摘要 |
 | `outputs/daily_returns.csv` | 调整收盘价计算的日收益率 |
 | `outputs/risk_metrics.csv` | CAGR、年化波动率、最大回撤和 Beta 等指标 |
@@ -142,7 +143,7 @@ python phase1_risk_analysis.py --allow-stale-cache
 | `outputs/walk_forward_folds.csv` | 每轮训练区间、测试区间、训练选出的参数及样本外结果 |
 | `outputs/walk_forward_oos_returns.csv` | 各轮拼接后的非重叠样本外收益序列 |
 | `outputs/walk_forward_summary.json` | walk-forward 总体样本外表现和验证口径 |
-| `outputs/holdings_valuation.csv` | 按最新有效调整收盘价估算的持仓市值、成本和盈亏 |
+| `outputs/holdings_valuation.csv` | 按最新有效未调整收盘价估算的持仓市值、成本和盈亏 |
 | `outputs/holdings_latest_price_weights.csv` | 每只持仓最近可用价格日期、市值与组合权重 |
 | `outputs/holdings_summary.json` | 导入持仓的整体市值、成本和集中度摘要 |
 | `outputs/holdings_reconciliation.json` | 导入持仓行合计与券商汇总金额之间的差异 |
@@ -227,7 +228,7 @@ python run_research.py \
 
 持仓 CSV 的必需列为 `ticker,shares,average_cost,snapshot_price`；可选列为 `name,risk_group,subgroup,currency,notes,quantity_source`。股票数量、平均成本和截图参考价应来自自己的券商记录，数据文件放在 `data/private/holdings_snapshot.csv`，该目录已被 `.gitignore` 排除。
 
-通过一键入口导入后，程序会根据持仓代码下载并检查历史行情，用最近有效的调整收盘价估算市值与组合权重，生成成本/盈亏表和单一仓位集中度提醒。如果同目录存在 `holdings_snapshot.csv.meta.json`，程序还会把行项目合计与券商截图总额对账，明确显示差异，而不是静默消除。
+通过一键入口导入后，程序会根据持仓代码下载并检查历史行情，用最近有效的未调整收盘价估算市值与组合权重，生成成本/盈亏表和单一仓位集中度提醒。如果同目录存在 `holdings_snapshot.csv.meta.json`，程序还会把行项目合计与券商截图总额对账，明确显示差异，而不是静默消除。
 
 **重要：** 股数必须与券商端核实。截图没有直接显示持股数量时，不应仅凭反推数字执行交易。最近历史收盘价不是实时可成交报价；现金、债券、其他账户、汇率及融资负债未导入时，权重只代表导入的股票/ETF 仓位。
 
