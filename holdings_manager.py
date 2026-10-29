@@ -144,7 +144,7 @@ def weights_from_price_panel(
     if max_staleness_calendar_days < 0:
         raise ValueError("max_staleness_calendar_days cannot be negative.")
     if price_panel.empty or price_panel.index.has_duplicates:
-        raise ValueError("Adjusted-close panel must be non-empty with unique dates.")
+        raise ValueError("Close-price panel must be non-empty with unique dates.")
     prices = price_panel.copy()
     prices.index = pd.to_datetime(prices.index)
     panel_end = pd.Timestamp(prices.index.max())
@@ -155,7 +155,7 @@ def weights_from_price_panel(
     for row in holdings.itertuples(index=False):
         series = pd.to_numeric(prices[row.ticker], errors="coerce").dropna()
         if series.empty:
-            raise ValueError(f"{row.ticker}: no valid adjusted-close data.")
+            raise ValueError(f"{row.ticker}: no valid close-price data.")
         price_date = pd.Timestamp(series.index.max())
         price = float(series.iloc[-1])
         if not np.isfinite(price) or price <= 0:
@@ -177,7 +177,7 @@ def weights_from_price_panel(
     valuation = pd.DataFrame(rows)
     total_value = float(valuation["market_value"].sum())
     if total_value <= 0:
-        raise ValueError("Total value based on latest adjusted prices must be positive.")
+        raise ValueError("Total value based on latest close prices must be positive.")
     valuation["weight"] = valuation["market_value"] / total_value
     weights = dict(zip(valuation["ticker"], valuation["weight"].astype(float)))
     return weights, valuation.sort_values("market_value", ascending=False).reset_index(drop=True)
