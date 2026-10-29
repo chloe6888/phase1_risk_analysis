@@ -51,6 +51,7 @@ def build_staged_plan(
     stress_prices: list[float] | None = None,
     max_add_cash: float | None = None,
     max_total_shares: float | None = None,
+    max_stress_loss_pct: float | None = None,
 ) -> pd.DataFrame:
     """Calculate a sequential, cumulative plan for multiple planned tranches.
 
@@ -72,6 +73,10 @@ def build_staged_plan(
         raise ValueError("max_add_cash must be finite and non-negative.")
     if max_total_shares is not None and (not np.isfinite(max_total_shares) or max_total_shares < shares):
         raise ValueError("max_total_shares must be finite and no smaller than the current share count.")
+    if max_stress_loss_pct is not None and (not np.isfinite(max_stress_loss_pct) or not 0 <= max_stress_loss_pct <= 1):
+        raise ValueError("max_stress_loss_pct must be between 0 and 1 (e.g. 0.10 for 10%).")
+    if max_stress_loss_pct is not None and not stress_prices:
+        raise ValueError("Stress prices are required when max_stress_loss_pct is set.")
 
     original_cost = shares * average_cost
     cumulative_cash = 0.0
@@ -91,6 +96,15 @@ def build_staged_plan(
                 f"Tranche {i} would bring total shares to {next_shares:g}, "
                 f"above max_total_shares {max_total_shares:g}."
             )
+        next_total_cost = original_cost + next_cash
+        if max_stress_loss_pct is not None and quantity > 0:
+            for stress in stress_prices:
+                stress_return = (next_shares * stress - next_total_cost) / next_total_cost
+                if stress_return < -max_stress_loss_pct - 1e-12:
+                    raise ValueError(
+                        f"Tranche {i} breaches the stress-loss limit at price {stress:g}: "
+                        f"loss {-stress_return:.2%} exceeds {max_stress_loss_pct:.2%}."
+                    )
 
         cumulative_cash = next_cash
         cumulative_shares += int(quantity)
@@ -131,6 +145,7 @@ def build_add_scenarios(
     stress_prices: list[float],
     max_add_cash: float | None = None,
     max_total_shares: float | None = None,
+    max_stress_loss_pct: float | None = None,
 ) -> pd.DataFrame:
     all_prices = [average_cost, reference_price, *entry_prices, *stress_prices]
     if not all(np.isfinite(p) and p > 0 for p in all_prices):
@@ -144,6 +159,10 @@ def build_add_scenarios(
         raise ValueError("max_add_cash must be finite and non-negative.")
     if max_total_shares is not None and (not np.isfinite(max_total_shares) or max_total_shares < shares):
         raise ValueError("max_total_shares must be finite and no smaller than the current share count.")
+    if max_stress_loss_pct is not None and (not np.isfinite(max_stress_loss_pct) or not 0 <= max_stress_loss_pct <= 1):
+        raise ValueError("max_stress_loss_pct must be between 0 and 1 (e.g. 0.10 for 10%).")
+    if max_stress_loss_pct is not None and not stress_prices:
+        raise ValueError("Stress prices are required when max_stress_loss_pct is set.")
 
     existing_cost = shares * average_cost
     rows: list[dict[str, float | int | str | bool]] = []
@@ -153,7 +172,25 @@ def build_add_scenarios(
             add_cost = entry * add_shares
             total_cost = existing_cost + add_cost
             new_avg = total_cost / new_shares
-            row: dict[str, float | int] = {
+            stress_returns = {stress: (new_shares * stress - total_cost) / total_cost for stress in stress_prices}
+            breached_stress = [
+                stress for stress, result in stress_returns.items()
+                if max_stress_loss_pct is not None and result < -max_stress_loss_pct - 1e-12
+            ]
+            within_budget = (
+                (max_add_cash is None or add_cost <= max_add_cash)
+                and (max_total_shares is None or new_shares <= max_total_shares)
+                and not breached_stress
+            )
+            reasons = [
+                f"cash {chr(36)}{add_cost:,.2f} exceeds limit {chr(36)}{max_add_cash:,.2f}" if max_add_cash is not None and add_cost > max_add_cash else "",
+                f"total shares {new_shares:g} exceeds limit {max_total_shares:g}" if max_total_shares is not None and new_shares > max_total_shares else "",
+            ]
+            reasons.extend(
+                f"stress price {chr(36)}{stress:g} implies loss {-stress_returns[stress]:.2%} above limit {max_stress_loss_pct:.2%}"
+                for stress in breached_stress
+            )
+            row: dict[str, float | int | str | bool] = {
                 "entry_price": entry,
                 "add_shares": add_shares,
                 "cash_required": add_cost,
@@ -163,11 +200,9 @@ def build_add_scenarios(
                 "position_value_at_reference_price": new_shares * reference_price,
                 "pnl_at_reference_price": new_shares * reference_price - total_cost,
                 "return_at_reference_price_pct": (new_shares * reference_price - total_cost) / total_cost,
-                "within_budget": (max_add_cash is None or add_cost <= max_add_cash) and (max_total_shares is None or new_shares <= max_total_shares),
-                "budget_reason": "; ".join(reason for reason in [
-                    f"cash {chr(36)}{add_cost:,.2f} exceeds limit {chr(36)}{max_add_cash:,.2f}" if max_add_cash is not None and add_cost > max_add_cash else "",
-                    f"total shares {new_shares:g} exceeds limit {max_total_shares:g}" if max_total_shares is not None and new_shares > max_total_shares else "",
-                ] if reason) or "within limits",
+                "within_budget": within_budget,
+                "budget_reason": "; ".join(reason for reason in reasons if reason) or "within limits",
+                "worst_stress_return_pct": min(stress_returns.values()) if stress_returns else np.nan,
             }
             for stress in stress_prices:
                 row[f"pnl_if_price_{stress:g}"] = new_shares * stress - total_cost
@@ -220,6 +255,7 @@ def main() -> None:
     parser.add_argument("--staged-shares", type=int, nargs="+", help="Share counts for each sequential tranche; use 0 to skip a tranche")
     parser.add_argument("--max-add-cash", type=float, help="Maximum total additional cash budget in USD")
     parser.add_argument("--max-total-shares", type=float, help="Maximum allowed total share count after adding")
+    parser.add_argument("--max-stress-loss-pct", type=float, help="Maximum permitted loss fraction at each stress price (0.10 = 10%%)")
     parser.add_argument("--stress-prices", type=float, nargs="*", default=[], help="Downside prices for stress-testing")
     parser.add_argument("--history-csv", type=Path, default=None, help="Optional daily CSV with Date plus Close or Adj Close")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
@@ -239,12 +275,14 @@ def main() -> None:
         scenario = build_staged_plan(
             args.shares, args.avg_cost, args.price, args.staged_prices, args.staged_shares,
             args.stress_prices, max_add_cash=args.max_add_cash, max_total_shares=args.max_total_shares,
+            max_stress_loss_pct=args.max_stress_loss_pct,
         )
         output_suffix = "staged_plan"
     else:
         scenario = build_add_scenarios(
             args.shares, args.avg_cost, args.price, args.levels, args.add_shares, args.stress_prices,
             max_add_cash=args.max_add_cash, max_total_shares=args.max_total_shares,
+            max_stress_loss_pct=args.max_stress_loss_pct,
         )
         output_suffix = "add_scenarios"
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -282,6 +320,8 @@ def main() -> None:
         print(f"Additional cash budget limit: {chr(36)}{args.max_add_cash:,.2f}")
     if args.max_total_shares is not None:
         print(f"Total share limit: {args.max_total_shares:g}")
+    if args.max_stress_loss_pct is not None:
+        print(f"Stress-loss limit: {args.max_stress_loss_pct:.2%} at all supplied stress prices")
 
 
 if __name__ == "__main__":
