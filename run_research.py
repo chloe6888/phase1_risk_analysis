@@ -266,7 +266,7 @@ def main() -> None:
     weights_text = args.weights
     holdings_value = None
     if imported_holdings is not None:
-        price_panel = load_price_panel(ROOT / "data" / "raw" / "adjusted_close_panel.csv")
+        price_panel = load_price_panel(ROOT / "data" / "raw" / "close_price_panel.csv")
         calculated_weights, latest_valuation = weights_from_price_panel(imported_holdings, price_panel)
         weights_text = ",".join(f"{ticker}={weight:.12f}" for ticker, weight in calculated_weights.items())
         latest_prices = dict(zip(latest_valuation["ticker"], latest_valuation["price"]))
