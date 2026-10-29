@@ -15,6 +15,7 @@ import pandas as pd
 from portfolio_risk import DEFAULT_OUTPUT_DIR, load_price_panel, parse_scenario
 from strategy_validation import parse_int_list
 from holdings_manager import load_holdings, summarize_holdings, weights_from_price_panel, risk_guardrail_alerts, reconcile_snapshot
+from memory_allocation import analyze_memory_positions
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = DEFAULT_OUTPUT_DIR
@@ -68,6 +69,8 @@ def render_report(
     holdings_summary: dict[str, Any] | None = None,
     holdings_alerts: list[dict[str, Any]] | None = None,
     holdings_reconciliation: dict[str, Any] | None = None,
+    memory_summary: dict[str, Any] | None = None,
+    memory_decisions: pd.DataFrame | None = None,
 ) -> str:
     lines = [
         "# Personal Quantitative Research Report",
@@ -121,6 +124,41 @@ def render_report(
             "Weights are calculated among imported equity/ETF positions only; cash, bonds, other accounts, FX liabilities, and margin financing are not included unless separately imported.",
             "Latest raw closes are historical valuation references, not live executable quotes. Confirm every share quantity and latest-price date before acting.", "",
         ])
+    if memory_summary:
+        lines += [
+            "## MU / SKHY / DRAM allocation review", "",
+            f"- Current memory sleeve: {fmt_pct(float(memory_summary.get('memory_sleeve_weight_pct', 0.0)) / 100.0)}",
+            f"- Policy limit: {fmt_pct(float(memory_summary.get('max_memory_weight_pct', 0.0)) / 100.0)}",
+            f"- Overall rule: {memory_summary.get('overall_action', 'N/A')}",
+            f"- Reason: {memory_summary.get('overall_reason', 'N/A')}",
+            f"- DRAM look-through holdings assumption date: {memory_summary.get('lookthrough_asof', 'N/A')}",
+            f"- Look-through issuer exposure: " + "; ".join(
+                f"{ticker}: {float(weight):.1f}%" for ticker, weight in memory_summary.get("lookthrough_issuer_weights_pct", {}).items()
+            ),
+            "",
+            "This is an allocation guardrail, not a forecast or an order. The default balanced scenario targets 8% MU, 6% SKHY and 5% DRAM of the selected reference portfolio. Update DRAM look-through weights and review company fundamentals before trading.",
+            "",
+        ]
+        if memory_decisions is not None and not memory_decisions.empty:
+            balanced = memory_decisions[memory_decisions["scenario"] == "balanced"]
+            if not balanced.empty:
+                lines += [
+                    "| Balanced scenario | Current shares | Target shares | Change | Action |",
+                    "|---|---:|---:|---:|---|",
+                ]
+                for row in balanced.itertuples(index=False):
+                    current = float(row.current_shares)
+                    target = float(row.target_shares)
+                    change = float(row.share_delta)
+                    lines.append(
+                        f"| {row.ticker} | {current:g} | {target:g} | {change:+g} | {row.action} |"
+                    )
+                lines.append("")
+        lines += [
+            memory_summary.get("denominator_warning", ""),
+            "Trailing price momentum and volatility are descriptive filters only; they do not override a breached position-size limit or replace fundamental valuation.",
+            "",
+        ]
     if portfolio:
         lines += [
             "## Portfolio risk", "",
@@ -201,6 +239,9 @@ def write_report(output_dir: Path, *, weights: str, benchmark: str) -> Path:
     backtest = read_json(output_dir / "backtest_summary.json")
     validation = read_json(output_dir / "strategy_validation_metadata.json")
     walk_forward = read_json(output_dir / "walk_forward_summary.json")
+    memory_summary = read_json(output_dir / "memory_allocation_summary.json")
+    memory_decisions_path = output_dir / "memory_allocation_scenarios.csv"
+    memory_decisions = pd.read_csv(memory_decisions_path) if memory_decisions_path.exists() else None
     holdings_summary = read_json(output_dir / "holdings_summary.json")
     alerts_payload = read_json(output_dir / "holdings_risk_alerts.json")
     reconciliation = read_json(output_dir / "holdings_reconciliation.json")
@@ -210,6 +251,8 @@ def write_report(output_dir: Path, *, weights: str, benchmark: str) -> Path:
         holdings_summary=holdings_summary,
         holdings_alerts=(alerts_payload or {}).get('alerts', []),
         holdings_reconciliation=reconciliation,
+        memory_summary=memory_summary,
+        memory_decisions=memory_decisions,
     )
     path = output_dir / "research_report.md"
     path.write_text(report, encoding="utf-8")
@@ -273,6 +316,7 @@ def main() -> None:
     run_step("1/5 Data download, cache, and validation", data_cmd)
 
     weights_text = args.weights
+    user_portfolio_value = args.portfolio_value
     holdings_value = None
     if imported_holdings is not None:
         price_panel = load_price_panel(ROOT / "data" / "raw" / "close_price_panel.csv")
@@ -285,6 +329,18 @@ def main() -> None:
         latest_valuation.to_csv(OUTPUT_DIR / "holdings_latest_price_weights.csv", index=False, float_format="%.10f")
         (OUTPUT_DIR / "holdings_summary.json").write_text(
             json.dumps(current_holdings_summary, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+        )
+        adjusted_price_panel = load_price_panel(ROOT / "data" / "raw" / "adjusted_close_panel.csv")
+        memory_summary, memory_positions, memory_decisions = analyze_memory_positions(
+            imported_holdings,
+            price_panel,
+            adjusted_close=adjusted_price_panel,
+            portfolio_value=user_portfolio_value,
+        )
+        memory_positions.to_csv(OUTPUT_DIR / "memory_position_diagnostics.csv", float_format="%.8f")
+        memory_decisions.to_csv(OUTPUT_DIR / "memory_allocation_scenarios.csv", index=False, float_format="%.8f")
+        (OUTPUT_DIR / "memory_allocation_summary.json").write_text(
+            json.dumps(memory_summary, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8"
         )
         alerts = risk_guardrail_alerts(valued_positions)
         (OUTPUT_DIR / "holdings_risk_alerts.json").write_text(
