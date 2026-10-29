@@ -196,12 +196,16 @@ def risk_guardrail_alerts(
     *,
     single_position_limit_pct: float = 15.0,
     risk_group_limit_pct: float = 45.0,
+    subgroup_limit_pct: float = 25.0,
 ) -> list[dict[str, str | float]]:
-    """Identify concentration-rule breaches for single tickers, themes, and subgroups."""
-    if not 0 < single_position_limit_pct <= 100:
-        raise ValueError("single_position_limit_pct must be in (0, 100].")
-    if not 0 < risk_group_limit_pct <= 100:
-        raise ValueError("risk_group_limit_pct must be in (0, 100].")
+    """Flag single names, broad risk themes, and narrower industry subgroups."""
+    for name, value in (
+        ("single_position_limit_pct", single_position_limit_pct),
+        ("risk_group_limit_pct", risk_group_limit_pct),
+        ("subgroup_limit_pct", subgroup_limit_pct),
+    ):
+        if not np.isfinite(value) or not 0 < value <= 100:
+            raise ValueError(f"{name} must be in (0, 100].")
     alerts: list[dict[str, str | float]] = []
     for row in positions.itertuples(index=False):
         weight = float(row.weight_pct)
@@ -211,29 +215,31 @@ def risk_guardrail_alerts(
                 "kind": "single_position_concentration",
                 "name": str(row.ticker),
                 "weight_pct": weight,
+                "threshold_pct": single_position_limit_pct,
                 "message": (
                     f"{row.ticker} weighs {weight:.1f}% of listed holdings, above the "
                     f"{single_position_limit_pct:.1f}% review threshold."
                 ),
             })
-    for column, label, kind in (
-        ("risk_group", "risk theme", "risk_group_concentration"),
-        ("subgroup", "industry subgroup", "subgroup_concentration"),
+    for column, label, kind, threshold in (
+        ("risk_group", "risk theme", "risk_group_concentration", risk_group_limit_pct),
+        ("subgroup", "industry subgroup", "subgroup_concentration", subgroup_limit_pct),
     ):
         if column not in positions.columns:
             continue
         group_weights = positions.groupby(column)["market_value"].sum() / positions["market_value"].sum() * 100.0
         for group, weight in group_weights.items():
-            if float(weight) > risk_group_limit_pct:
+            if float(weight) > threshold:
                 alerts.append({
                     "level": "warning",
                     "kind": kind,
                     "group_type": label,
                     "name": str(group),
                     "weight_pct": float(weight),
+                    "threshold_pct": threshold,
                     "message": (
                         f"{label.capitalize()} '{group}' weighs {float(weight):.1f}% of listed holdings, above the "
-                        f"{risk_group_limit_pct:.1f}% review threshold."
+                        f"{threshold:.1f}% review threshold."
                     ),
                 })
     return alerts

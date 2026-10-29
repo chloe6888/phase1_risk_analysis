@@ -90,3 +90,30 @@ def test_reconcile_snapshot_reports_deltas_instead_of_hiding_them() -> None:
     assert result["market_value_delta"]==pytest.approx(1.5)
     assert result["unrealized_pnl_delta"]==pytest.approx(0.8)
     assert result["within_tolerance"] is False
+
+
+def test_subgroup_limit_is_separate_from_broad_risk_group_limit() -> None:
+    frame = pd.DataFrame([
+        {"ticker":"MU","shares":3,"average_cost":100,"snapshot_price":100,"risk_group":"semiconductor_related","subgroup":"memory"},
+        {"ticker":"SKHY","shares":20,"average_cost":100,"snapshot_price":100,"risk_group":"semiconductor_related","subgroup":"memory"},
+        {"ticker":"LRCX","shares":10,"average_cost":100,"snapshot_price":100,"risk_group":"semiconductor_related","subgroup":"semiconductor_equipment"},
+        {"ticker":"GOOG","shares":25,"average_cost":100,"snapshot_price":100,"risk_group":"internet_platform","subgroup":"search_cloud_ai"},
+        {"ticker":"OKTA","shares":25,"average_cost":100,"snapshot_price":100,"risk_group":"enterprise_security","subgroup":"identity_security_software"},
+    ])
+    positions, _ = app.summarize_holdings(frame)
+    alerts = app.risk_guardrail_alerts(positions, risk_group_limit_pct=45, subgroup_limit_pct=25)
+    assert not any(
+        a["kind"] == "risk_group_concentration" and a["name"] == "semiconductor_related"
+        for a in alerts
+    )
+    memory_alert = next(
+        a for a in alerts if a["kind"] == "subgroup_concentration" and a["name"] == "memory"
+    )
+    assert memory_alert["weight_pct"] > 25
+    assert memory_alert["threshold_pct"] == 25
+
+
+def test_guardrail_rejects_invalid_subgroup_limit() -> None:
+    positions, _ = app.summarize_holdings(sample_holdings())
+    with pytest.raises(ValueError, match="subgroup_limit_pct"):
+        app.risk_guardrail_alerts(positions, subgroup_limit_pct=0)
