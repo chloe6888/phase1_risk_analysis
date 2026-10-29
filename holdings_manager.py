@@ -186,8 +186,8 @@ def weights_from_price_panel(
 def risk_guardrail_alerts(
     positions: pd.DataFrame,
     *,
-    single_position_limit_pct: float = 20.0,
-    risk_group_limit_pct: float = 40.0,
+    single_position_limit_pct: float = 15.0,
+    risk_group_limit_pct: float = 45.0,
 ) -> list[dict[str, str | float]]:
     """Identify concentration-rule breaches for single tickers, themes, and subgroups."""
     if not 0 < single_position_limit_pct <= 100:
