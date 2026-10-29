@@ -117,3 +117,37 @@ def test_report_shows_imported_holdings_reconciliation_and_alerts() -> None:
     assert "verify shares" in report
     assert "semiconductor_related" in report
     assert "cash, bonds" in report
+
+
+def test_report_renders_memory_allocation_rule_and_balanced_share_targets() -> None:
+    decisions = pd.DataFrame([
+        {"scenario":"balanced","ticker":"MU","current_shares":3,"target_shares":2,"share_delta":-1,"action":"REDUCE_TO_TARGET"},
+        {"scenario":"balanced","ticker":"SKHY","current_shares":20,"target_shares":8,"share_delta":-12,"action":"REDUCE_TO_TARGET"},
+        {"scenario":"balanced","ticker":"DRAM","current_shares":20,"target_shares":20,"share_delta":0,"action":"HOLD"},
+        {"scenario":"etf_core","ticker":"DRAM","current_shares":20,"target_shares":60,"share_delta":40,"action":"HOLD_NO_AUTO_ADD"},
+    ])
+    report = app.render_report(
+        generated_at="2026-10-29T00:00:00+00:00",
+        weights="GOOG=0.5,SPY=0.5",
+        benchmark="SPY",
+        data=None,
+        portfolio=None,
+        backtest=None,
+        validation=None,
+        walk_forward=None,
+        memory_summary={
+            "memory_sleeve_weight_pct": 33.0,
+            "max_memory_weight_pct": 25.0,
+            "overall_action": "REDUCE_MEMORY_SLEEVE",
+            "overall_reason": "Memory sleeve breaches limit.",
+            "lookthrough_asof": "2026-10-28",
+            "lookthrough_issuer_weights_pct": {"MU":14.0,"SKHY":16.0},
+            "denominator_warning": "Imported listed positions only.",
+        },
+        memory_decisions=decisions,
+    )
+    assert "MU / SKHY / DRAM allocation review" in report
+    assert "REDUCE_MEMORY_SLEEVE" in report
+    assert "SKHY" in report
+    assert "Target shares" in report
+    assert "Imported listed positions only" in report
