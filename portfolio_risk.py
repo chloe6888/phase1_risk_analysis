@@ -139,14 +139,14 @@ def calculate_portfolio_risk(
     drawdown = max_drawdown_series(portfolio_returns)
     observations = int(len(portfolio_returns))
     total_growth = float((1.0 + portfolio_returns).prod())
-    annualized_return = total_growth ** (periods_per_year / observations) - 1.0 if total_growth > 0 else float("nan")
+    annualized_return = total_growth ** (periods_per_year / observations) - 1.0 if total_growth > 0 else None
     daily_volatility = float(portfolio_returns.std(ddof=1))
     annualized_volatility = daily_volatility * math.sqrt(periods_per_year)
     daily_rf = (1.0 + risk_free_rate_annual) ** (1.0 / periods_per_year) - 1.0
     excess = portfolio_returns - daily_rf
-    sharpe = float(excess.mean() / daily_volatility * math.sqrt(periods_per_year)) if daily_volatility > 0 else float("nan")
+    sharpe = float(excess.mean() / daily_volatility * math.sqrt(periods_per_year)) if daily_volatility > 0 else None
     downside_deviation = float(np.sqrt(np.square(np.minimum(excess, 0.0)).mean()))
-    sortino = float(excess.mean() / downside_deviation * math.sqrt(periods_per_year)) if downside_deviation > 0 else float("nan")
+    sortino = float(excess.mean() / downside_deviation * math.sqrt(periods_per_year)) if downside_deviation > 0 else None
     max_drawdown = float(drawdown["drawdown"].min())
     alpha = 1.0 - confidence_level
     tail_threshold = float(portfolio_returns.quantile(alpha))
