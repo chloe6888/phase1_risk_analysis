@@ -16,6 +16,7 @@
 - 提供只在本机读取研究产物的 Streamlit 仪表盘，可查看组合风险、策略净值、参数实验、walk-forward 和综合报告，并从侧边栏提交研究任务。
 - 仓位集中度规则分开配置：单一股票默认 15%，整体风险主题默认 45%，行业子主题默认 25%；超限仅提示复核，不自动交易。
 - 支持导入本地持仓 CSV，按持股数量与最新可用收盘价计算市值和组合权重，并检测单一仓位和主题集中度；持仓文件被 Git 忽略，不提交到公开仓库。
+- 增加 MU、SKHY、DRAM 存储主题决策模块：估算 DRAM ETF 对 MU/SKHY 的穿透敞口，输出主题上限、20/60 日趋势诊断和三种目标配置情景；仅作风险预算与复核，不自动下单。
 - 计算 20/60/120 个观测窗口的滚动波动率和回撤，并支持自定义压力情景。
 - 如果组合所含股票的上市历史较短，默认滚动风险窗口会按共同收益观测数自动缩短；历史不足时明确标注，不会因滚动图窗口不足而中断整份报告。
 - 输出相关矩阵及每一对资产的共同观测数量。
@@ -41,6 +42,7 @@
     ├── run_research.py
     ├── dashboard.py
     ├── holdings_manager.py
+    ├── memory_allocation.py
     ├── requirements-dashboard.txt
     ├── start_dashboard.sh
     ├── start_dashboard.ps1
@@ -152,6 +154,9 @@ python phase1_risk_analysis.py --allow-stale-cache
 | `outputs/holdings_summary.json` | 导入持仓的整体市值、成本和集中度摘要 |
 | `outputs/holdings_reconciliation.json` | 导入持仓行合计与券商汇总金额之间的差异 |
 | `outputs/holdings_risk_alerts.json` | 单一持仓与风险主题集中度提醒 |
+| `outputs/memory_allocation_summary.json` | MU/SKHY/DRAM 主题占比、DRAM 穿透敞口和总体风险预算判断 |
+| `outputs/memory_position_diagnostics.csv` | 三项持仓最新收盘价、仓位权重、20/60 日动量与波动率诊断 |
+| `outputs/memory_allocation_scenarios.csv` | 平衡、ETF 核心、直接持股三种持仓结构的目标股数与建议动作 |
 | `outputs/research_report.md` | 汇总数据覆盖、组合风险、基准回测和样本外验证的报告 |
 | `outputs/research_run_manifest.json` | 本次研究使用的参数和运行记录（保存在本地输出目录，不提交到仓库） |
 
@@ -235,6 +240,33 @@ python run_research.py \
 通过一键入口导入后，程序会根据持仓代码下载并检查历史行情，用最近有效的未调整收盘价估算市值与组合权重，生成成本/盈亏表和单一仓位集中度提醒。如果同目录存在 `holdings_snapshot.csv.meta.json`，程序还会把行项目合计与券商截图总额对账，明确显示差异，而不是静默消除。
 
 **重要：** 股数必须与券商端核实。截图没有直接显示持股数量时，不应仅凭反推数字执行交易。最近历史收盘价不是实时可成交报价；现金、债券、其他账户、汇率及融资负债未导入时，权重只代表导入的股票/ETF 仓位。
+
+## MU / SKHY / DRAM 存储持仓决策模块
+
+这个模块针对直接持有 MU、SKHY，同时持有存储 ETF DRAM 的重叠敞口。它使用最近有效的未调整收盘价计算实际股数市值；用调整收盘价计算 20/60 个交易日收益、20 日年化波动率和简单趋势状态；并把 DRAM 内部对 MU/SKHY 的估算持仓加入发行人穿透敞口。它不预测股票未来涨跌，也不连接券商下单。
+
+运行完整研究流程并导入包含 MU、SKHY、DRAM 的本地持仓 CSV 后，结果会自动写入 `outputs/memory_allocation_summary.json`、`outputs/memory_position_diagnostics.csv` 和 `outputs/memory_allocation_scenarios.csv`；仪表盘也会显示“存储持仓”页。
+
+也可以在已经下载好两份行情面板后单独运行：
+
+```bash
+python memory_allocation.py \
+  --holdings-csv data/private/holdings_snapshot.csv \
+  --prices data/raw/close_price_panel.csv \
+  --adjusted-prices data/raw/adjusted_close_panel.csv \
+  --max-memory-weight-pct 25 \
+  --max-issuer-exposure-pct 12
+```
+
+当前默认策略参数是一个**可修改的保守风险预算起点**，不是历史回测得出的最优组合：
+- 总存储主题（MU + SKHY + DRAM）占参考组合不超过 25%；
+- 默认平衡方案目标权重：MU 8%、SKHY 6%、DRAM 5%，合计 19%；
+- 同时输出 ETF 核心方案（仅 DRAM 15%）和直接持股方案（MU 8%、SKHY 8%，不持 DRAM），以便比较“ETF 分散”和“发行人集中”之间的取舍；
+- 若当前股数高于目标股数，标记 `REDUCE_TO_TARGET`；若低于目标股数，默认标记 `HOLD_NO_AUTO_ADD`，不会自动补仓。
+
+DRAM 穿透权重默认使用公开持仓页面在 2026-10-28 检查到的指示性比例：MU 约 28.25%、SK Hynix 约 21.32%。它们可能通过普通持股和掉期等多种方式形成，基金仓位会变动，需定期更新；这不是基金官方永久固定权重。若要修改平衡方案，可使用 `--target-weights MU=8,SKHY=6,DRAM=5`。只有在提供 `--portfolio-value` 或从其他途径输入完整净资产（含现金及负债）时，输出权重才代表整个账户；否则百分比仅按导入的证券持仓计算。
+
+**使用边界：** 目标权重、单发行人上限和主题上限是策略假设，不等于买卖信号。趋势指标只帮助识别短期转弱，不代表基本面价值判断。执行调仓前仍需核对真实持股数量、最新基金穿透持仓、公司估值、财报、税费、流动性与保证金要求。
 
 ## 本地仪表盘
 
