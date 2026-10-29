@@ -1,4 +1,4 @@
-# Python
+# Python cache and virtual environments
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -8,15 +8,15 @@ htmlcov/
 venv/
 .env
 
-# Notebook
+# Notebook runtime artifacts
 .ipynb_checkpoints/
 
-# Local market data and generated reports
+# Downloaded market data and generated analysis outputs (keep directory placeholders)
 data/raw/*.csv
 outputs/*.csv
 outputs/*.png
 
-# Editor / OS
+# OS / editor files
 .DS_Store
 .vscode/
 .idea/
