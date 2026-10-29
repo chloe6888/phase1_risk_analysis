@@ -90,6 +90,7 @@ python phase1_risk_analysis.py --allow-stale-cache
 |---|---|
 | `data/raw/<TICKER>_daily.csv` | 各标的整理后的行情缓存，包含可用 OHLCV 和公司行为字段 |
 | `data/raw/<TICKER>_daily.meta.json` | 缓存来源、请求日期范围、下载时间、有效数据起止日和行数 |
+| `data/raw/<TICKER>_daily.meta.json` | 缓存来源、请求日期范围、下载时间、有效数据起止日和行数 |
 | `data/raw/adjusted_close_panel.csv` | 调整收盘价面板 |
 | `outputs/data_quality_report.csv` | 数据完整性摘要 |
 | `outputs/daily_returns.csv` | 调整收盘价计算的日收益率 |
@@ -143,15 +144,15 @@ python position_scenarios.py \
 ```bash
 python position_scenarios.py \
   --ticker GOOGL \
-  --shares 13 \
-  --avg-cost 306 \
-  --price 290 \
-  --staged-prices 290 280 268 255 240 \
-  --staged-shares 2 2 2 3 3 \
-  --stress-prices 267.67 255 240 220 \
-  --max-add-cash 3200 \
-  --max-total-shares 25 \
-  --max-stress-loss-pct 0.10
+  --shares 10 \
+  --avg-cost 100 \
+  --price 95 \
+  --staged-prices 95 90 85 80 75 \
+  --staged-shares 1 1 1 1 1 \
+  --stress-prices 80 75 \
+  --max-add-cash 500 \
+  --max-total-shares 15 \
+  --max-stress-loss-pct 0.25
 ```
 
 命令中的行情和持仓数字只是规划示例，并非当前报价或买入建议。独立情景仍使用 `--levels` 与 `--add-shares`；这两项生成的是彼此独立的情景，不是按顺序执行的累计计划。
