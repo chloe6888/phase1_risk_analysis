@@ -72,7 +72,6 @@ def test_weights_from_latest_prices_tracks_dates_and_staleness() -> None:
     stale=prices.copy()
     stale.loc[dates[-1],"BBB"]=float("nan")
     stale.loc[dates[-2],"BBB"]=float("nan")
-    stale.loc[dates[-3],"BBB"]=float("nan")
     with pytest.raises(ValueError,match="older than the panel end"):
         app.weights_from_price_panel(holdings,stale,max_staleness_calendar_days=0)
 
