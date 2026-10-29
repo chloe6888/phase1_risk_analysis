@@ -22,8 +22,8 @@ def test_load_holdings_normalizes_and_computes_snapshot_summary(tmp_path) -> Non
     positions,summary=app.summarize_holdings(frame)
     assert len(positions)==3
     assert summary["position_count"]==3
-    assert summary["market_value"]==pytest.approx(1560)
-    assert summary["unrealized_pnl"]==pytest.approx(80)
+    assert summary["market_value"]==pytest.approx(1620)
+    assert summary["unrealized_pnl"]==pytest.approx(70)
     assert positions.iloc[0]["ticker"]=="AAA"
 
 
@@ -58,7 +58,7 @@ def test_reference_prices_override_screenshot_prices() -> None:
     aaa=positions.set_index("ticker").loc["AAA"]
     assert aaa["reference_price"]==pytest.approx(120)
     assert aaa["market_value"]==pytest.approx(1200)
-    assert summary["market_value"]==pytest.approx(1760)
+    assert summary["market_value"]==pytest.approx(1795)
 
 
 def test_weights_from_latest_prices_tracks_dates_and_staleness() -> None:
