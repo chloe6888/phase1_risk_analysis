@@ -26,13 +26,17 @@ def sample_holdings() -> pd.DataFrame:
 def sample_prices(n: int = 90) -> pd.DataFrame:
     dates = pd.bdate_range("2026-05-01", periods=n)
     t = np.arange(n, dtype=float)
-    return pd.DataFrame({
+    frame = pd.DataFrame({
         "MU": 60 + 0.5*t + 3*np.sin(t/5),
         "SKHY": 30 + 0.2*t + 2*np.sin(t/7),
         "DRAM": 15 + 0.12*t + np.sin(t/8),
         "GOOG": 100 + 0.25*t + np.sin(t/4),
         "SPY": 450 + 0.3*t + np.sin(t/6),
     }, index=dates)
+    expected_last_prices = {"MU": 100.0, "SKHY": 50.0, "DRAM": 25.0, "GOOG": 200.0, "SPY": 500.0}
+    for ticker, target in expected_last_prices.items():
+        frame[ticker] *= target / float(frame[ticker].iloc[-1])
+    return frame
 
 
 def test_calculate_memory_allocation_flags_concentration_and_overlap() -> None:
