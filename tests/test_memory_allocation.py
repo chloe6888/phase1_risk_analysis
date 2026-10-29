@@ -67,7 +67,7 @@ def test_balanced_targets_calculate_reductions_without_auto_adds() -> None:
     assert balanced.loc["DRAM", "share_delta"] == -29
     etf_core = decisions[decisions["scenario"] == "etf_core"].set_index("ticker")
     assert etf_core.loc["MU", "target_shares"] == 0
-    assert etf_core.loc["DRAM", "action"] == "HOLD_NO_AUTO_ADD"
+    assert etf_core.loc["DRAM", "action"] == "REDUCE_TO_TARGET"
 
 
 def test_user_supplied_portfolio_equity_changes_weight_denominator() -> None:
