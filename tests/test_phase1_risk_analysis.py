@@ -210,6 +210,9 @@ def test_cache_is_rejected_when_stale_or_range_is_incomplete(monkeypatch: pytest
         "downloaded_at_utc": "2024-01-30T00:00:00+00:00",
         "requested_start": "2024-01-01",
         "requested_end": "2024-02-01",
+        "first_data_date": "2024-01-02",
+        "last_data_date": "2024-01-03",
+        "row_count": 2,
     }
     meta_path.write_text(json.dumps(meta), encoding="utf-8")
     usable, reason = app.cache_is_usable("TEST", data, "2024-01-01", "2024-02-01", max_age_hours=24, now=now)
@@ -235,6 +238,9 @@ def test_fresh_cache_is_accepted(monkeypatch: pytest.MonkeyPatch, tmp_path) -> N
         "downloaded_at_utc": "2024-02-02T00:00:00+00:00",
         "requested_start": "2024-01-01",
         "requested_end": "2024-02-02",
+        "first_data_date": "2024-01-02",
+        "last_data_date": "2024-02-01",
+        "row_count": 2,
     }
     app.cache_metadata_path("TEST").write_text(json.dumps(meta), encoding="utf-8")
     data = pd.DataFrame(
