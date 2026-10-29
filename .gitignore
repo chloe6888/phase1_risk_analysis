@@ -13,8 +13,10 @@ venv/
 
 # Downloaded market data and generated analysis outputs (keep directory placeholders)
 data/raw/*.csv
+data/raw/*.meta.json
 outputs/*.csv
 outputs/*.png
+outputs/*.json
 
 # OS / editor files
 .DS_Store
