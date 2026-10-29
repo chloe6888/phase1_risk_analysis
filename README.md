@@ -23,6 +23,7 @@
     ├── phase1_risk_analysis.py
     ├── tests/
     │   └── test_phase1_risk_analysis.py
+    ├── .github/workflows/tests.yml
     ├── data/raw/       # 本地行情缓存；CSV 默认不提交
     └── outputs/        # 运行后生成的表格与图片；默认不提交
 
@@ -36,30 +37,36 @@
 
 macOS / Linux：
 
-    python3 -m venv .venv
-    source .venv/bin/activate
-    python -m pip install -r requirements.txt
-    python phase1_risk_analysis.py
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python phase1_risk_analysis.py
+```
 
 Windows PowerShell：
 
-    py -3 -m venv .venv
-    .venv\Scripts\Activate.ps1
-    python -m pip install -r requirements.txt
-    python phase1_risk_analysis.py
+```powershell
+py -3 -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python phase1_risk_analysis.py
+```
 
 脚本默认优先读取本地缓存。首次运行时，缺失的标的会从数据源下载。需要强制更新所有标的时运行：
 
-    python phase1_risk_analysis.py --refresh
+```bash
+python phase1_risk_analysis.py --refresh
+```
 
 ## 配置
 
 在脚本顶部调整以下参数：
 
-- TICKERS：研究标的列表，默认 SPY、SOXX、NVDA。
-- BENCHMARK：Beta 基准，默认 SPY，必须包含在 TICKERS 中。
-- START_DATE：下载起始日期，默认 2015-01-01。
-- END_DATE：默认取纽约当地当前日期，下载接口的结束日期不包含当天。
+- `TICKERS`：研究标的列表，默认 SPY、SOXX、NVDA。
+- `BENCHMARK`：Beta 基准，默认 SPY，必须包含在 `TICKERS` 中。
+- `START_DATE`：下载起始日期，默认 2015-01-01。
+- `END_DATE`：默认取纽约当地当前日期，下载接口的结束日期不包含当天。
 
 建议第一次使用默认配置，成功运行后再添加标的。
 
@@ -67,16 +74,16 @@ Windows PowerShell：
 
 | 文件 | 内容 |
 |---|---|
-| data/raw/<TICKER>_daily.csv | 各标的整理后的行情缓存，包含可用 OHLCV 和公司行为字段 |
-| data/raw/adjusted_close_panel.csv | 调整收盘价面板 |
-| outputs/data_quality_report.csv | 数据完整性摘要 |
-| outputs/daily_returns.csv | 调整收盘价计算的日收益率 |
-| outputs/risk_metrics.csv | CAGR、年化波动率、最大回撤和 Beta 等指标 |
-| outputs/correlation_matrix.csv | 日收益率相关矩阵 |
-| outputs/closing_prices.png | 各标的价格序列 |
-| outputs/net_value.png | 共同样本起点归一化为 100 的净值比较 |
-| outputs/drawdown.png | 从历史高点计算的回撤曲线 |
-| outputs/correlation_matrix.png | 相关矩阵热力图 |
+| `data/raw/<TICKER>_daily.csv` | 各标的整理后的行情缓存，包含可用 OHLCV 和公司行为字段 |
+| `data/raw/adjusted_close_panel.csv` | 调整收盘价面板 |
+| `outputs/data_quality_report.csv` | 数据完整性摘要 |
+| `outputs/daily_returns.csv` | 调整收盘价计算的日收益率 |
+| `outputs/risk_metrics.csv` | CAGR、年化波动率、最大回撤和 Beta 等指标 |
+| `outputs/correlation_matrix.csv` | 日收益率相关矩阵 |
+| `outputs/closing_prices.png` | 各标的价格序列 |
+| `outputs/net_value.png` | 共同样本起点归一化为 100 的净值比较 |
+| `outputs/drawdown.png` | 从历史高点计算的回撤曲线 |
+| `outputs/correlation_matrix.png` | 相关矩阵热力图 |
 
 ## 计算口径与局限
 
@@ -92,19 +99,23 @@ Windows PowerShell：
 
 安装开发依赖后，在项目根目录运行：
 
-    python -m pip install -r requirements-dev.txt
-    python -m pytest -q
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
 
 测试使用人工构造的离线数据，不代表真实市场行情验证，也不替代数据源交叉核验。
 
+仓库配置了 GitHub Actions，会在向 `main` 分支推送或提交针对 `main` 的 Pull Request 时运行这些测试。
+
 ## 后续路线
 
-1. 完成数据质量和风险指标验收。
-2. 实现横截面动量因子，并手工核对信号、分组和收益的时间关系。
-3. 做窗口、股票池、权重和样本区间的稳健性实验。
-4. 加入换手、成本和成交假设。
-5. 审计未来函数、幸存者偏差、多重试验和样本外表现。
-6. 只有研究结果、风险预算与规则失效条件明确后，才评估是否进行模拟交易。
+1. **数据与风险刻画**：验证数据、指标、净值和相关矩阵。
+2. **横截面动量 v1**：定义因子和调仓规则，输出五组收益并手工追踪信号、分组与收益的时间关系。
+3. **稳健性实验**：对照公开因子，改变窗口、股票池和权重，并记录所有实验。
+4. **现实约束 v2**：加入换手率、成本和成交价格假设。
+5. **回测审计**：检查未来函数、幸存者偏差、多重试验和样本外表现。
+6. **试运行评估**：只有规则、失效条件、风险预算和监控机制书面明确后，才评估是否进行模拟交易。
 
 ---
 
