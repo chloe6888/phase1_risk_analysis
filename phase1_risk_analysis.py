@@ -445,19 +445,22 @@ def save_plots(adjusted_close: pd.DataFrame) -> None:
     plt.close(fig)
 
 
-def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_hours: float = DEFAULT_MAX_CACHE_AGE_HOURS) -> None:
-    if BENCHMARK not in TICKERS:
+def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_hours: float = DEFAULT_MAX_CACHE_AGE_HOURS, tickers: list[str] | None = None) -> None:
+    active_tickers = TICKERS.copy() if tickers is None else [str(ticker).strip().upper() for ticker in tickers]
+    if not active_tickers or any(not ticker for ticker in active_tickers):
+        raise ValueError("At least one valid ticker must be supplied.")
+    if BENCHMARK not in active_tickers:
         raise ValueError(
             f"Benchmark {BENCHMARK!r} must be included in TICKERS. "
             "Update the configuration at the top of this file."
         )
-    if len(set(TICKERS)) != len(TICKERS):
+    if len(set(active_tickers)) != len(active_tickers):
         raise ValueError("TICKERS contains duplicates; each ticker must appear only once.")
 
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    print(f"Tickers: {', '.join(TICKERS)}")
+    print(f"Tickers: {', '.join(active_tickers)}")
     if refresh:
         print(f"Refreshing data: {START_DATE} to before {END_DATE} (end date exclusive)")
     else:
@@ -465,7 +468,7 @@ def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_h
     raw_data: dict[str, pd.DataFrame] = {}
     series: dict[str, pd.Series] = {}
 
-    for ticker in TICKERS:
+    for ticker in active_tickers:
         print(f"Loading {ticker} ...")
         try:
             data = get_ticker_data(ticker, START_DATE, END_DATE, refresh=refresh, allow_stale_cache=allow_stale_cache, max_cache_age_hours=max_cache_age_hours)
@@ -502,7 +505,7 @@ def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_h
     analysis_metadata = {
         "run_at_utc": datetime.now(timezone.utc).isoformat(),
         "source": "yfinance/Yahoo Finance",
-        "tickers": TICKERS,
+        "tickers": active_tickers,
         "benchmark": BENCHMARK,
         "requested_start": START_DATE,
         "requested_end_exclusive": END_DATE,
@@ -555,6 +558,12 @@ if __name__ == "__main__":
         help="if refresh fails, explicitly allow stale local CSV data (results will be warned as stale)",
     )
     parser.add_argument(
+        "--tickers",
+        type=str,
+        default=None,
+        help="optional comma-separated ticker list; the benchmark SPY must be included",
+    )
+    parser.add_argument(
         "--max-cache-age-hours",
         type=float,
         default=DEFAULT_MAX_CACHE_AGE_HOURS,
@@ -563,4 +572,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.max_cache_age_hours <= 0:
         parser.error("--max-cache-age-hours must be positive")
-    main(refresh=args.refresh, allow_stale_cache=args.allow_stale_cache, max_cache_age_hours=args.max_cache_age_hours)
+    main(refresh=args.refresh, allow_stale_cache=args.allow_stale_cache, max_cache_age_hours=args.max_cache_age_hours, tickers=[item.strip().upper() for item in args.tickers.split(",") if item.strip()] if args.tickers else None)
