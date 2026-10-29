@@ -8,6 +8,8 @@
 - 检查数据日期、重复行、缺失值、OHLC 合法性和异常大幅日收益。
 - 使用带下载元数据的本地缓存；缓存过期、覆盖范围不完整或缺失元数据时自动刷新。
 - 计算日收益率、复合年化收益率（CAGR）、年化波动率、最大回撤和相对 SPY 的 Beta。
+- 计算组合总收益、年化收益/波动率、Sharpe、Sortino、最大回撤、历史 VaR/CVaR，以及各持仓对组合波动率的贡献。
+- 计算 20/60/120 个观测窗口的滚动波动率和回撤，并支持自定义压力情景。
 - 输出相关矩阵及每一对资产的共同观测数量。
 - 输出最大回撤的峰值/谷值/恢复日期，以及每次分析的数据截止时间。
 - 绘制个股完整可用区间价格图、共同样本净值图、回撤图和相关矩阵图。
@@ -24,9 +26,11 @@
     ├── .gitignore
     ├── phase1_risk_analysis.py
     ├── position_scenarios.py
+    ├── portfolio_risk.py
     ├── tests/
     │   ├── test_phase1_risk_analysis.py
-    │   └── test_position_scenarios.py
+    │   ├── test_position_scenarios.py
+    │   └── test_portfolio_risk.py
     ├── .github/workflows/tests.yml
     ├── data/raw/       # 本地行情缓存；CSV 默认不提交
     └── outputs/        # 运行后生成的表格与图片；默认不提交
@@ -90,7 +94,6 @@ python phase1_risk_analysis.py --allow-stale-cache
 |---|---|
 | `data/raw/<TICKER>_daily.csv` | 各标的整理后的行情缓存，包含可用 OHLCV 和公司行为字段 |
 | `data/raw/<TICKER>_daily.meta.json` | 缓存来源、请求日期范围、下载时间、有效数据起止日和行数 |
-| `data/raw/<TICKER>_daily.meta.json` | 缓存来源、请求日期范围、下载时间、有效数据起止日和行数 |
 | `data/raw/adjusted_close_panel.csv` | 调整收盘价面板 |
 | `outputs/data_quality_report.csv` | 数据完整性摘要 |
 | `outputs/daily_returns.csv` | 调整收盘价计算的日收益率 |
@@ -103,6 +106,32 @@ python phase1_risk_analysis.py --allow-stale-cache
 | `outputs/net_value.png` | 共同样本起点归一化为 100 的净值比较 |
 | `outputs/drawdown.png` | 从历史高点计算的回撤曲线 |
 | `outputs/correlation_matrix.png` | 相关矩阵热力图 |
+| `outputs/portfolio_risk_summary.json` | 组合汇总指标及权重口径 |
+| `outputs/portfolio_risk_contributions.csv` | 各持仓对组合波动率的贡献 |
+| `outputs/portfolio_daily_returns.csv` | 资产日收益及组合日收益 |
+| `outputs/portfolio_drawdown.csv` | 组合净值、运行高点和回撤序列 |
+| `outputs/portfolio_rolling_risk.csv` | 滚动波动率和滚动最大回撤 |
+| `outputs/portfolio_stress_tests.csv` | 用户定义压力情景下的组合损益 |
+
+## 组合风险分析
+
+先运行 `phase1_risk_analysis.py` 生成 `data/raw/adjusted_close_panel.csv`，再按实际组合权重运行：
+
+```bash
+python portfolio_risk.py --weights GOOGL=0.60,SPY=0.40
+```
+
+可选地加入压力情景和组合市值，测算不同资产冲击下的组合影响：
+
+```bash
+python portfolio_risk.py \
+  --weights GOOGL=0.60,SPY=0.40 \
+  --portfolio-value 10000 \
+  --scenario tech_selloff:GOOGL=-0.25,SPY=-0.10 \
+  --scenario broad_selloff:GOOGL=-0.20,SPY=-0.20
+```
+
+权重会自动归一化，当前版本只支持非负权重（不支持做空）。压力情景中的收益冲击使用小数表示，例如 `-0.20` 表示下跌 20%；未指定的资产冲击按 0 处理。历史 VaR/CVaR 是一个观测周期的历史尾部估计，不是最大损失保证。组合日收益使用目标权重按每个观测区间再平衡的假设；若你要模拟买入后长期不调仓的持有组合，需要在后续版本增加 buy-and-hold 权重漂移模型。
 
 ## 计算口径与局限
 
