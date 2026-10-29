@@ -287,3 +287,29 @@ def test_correlation_observation_counts_are_pairwise() -> None:
     assert counts.loc["A", "A"] == 2
     assert counts.loc["B", "B"] == 2
     assert counts.loc["A", "B"] == 1
+
+
+def test_cache_is_rejected_when_metadata_does_not_match_csv(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import json
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(app, "RAW_DIR", tmp_path)
+    now = datetime(2024, 2, 2, 12, tzinfo=timezone.utc)
+    meta = {
+        "ticker": "TEST", "downloaded_at_utc": "2024-02-02T00:00:00+00:00",
+        "requested_start": "2024-01-01", "requested_end": "2024-02-02",
+        "first_data_date": "2024-01-02", "last_data_date": "2024-02-01", "row_count": 99,
+    }
+    app.cache_metadata_path("TEST").write_text(json.dumps(meta), encoding="utf-8")
+    data = pd.DataFrame({"Adj Close": [100.0, 101.0]}, index=pd.to_datetime(["2024-01-02", "2024-02-01"]))
+    usable, reason = app.cache_is_usable("TEST", data, "2024-01-01", "2024-02-02", max_age_hours=24, now=now)
+    assert not usable
+    assert "row count does not match" in reason
+
+
+def test_invalid_cache_triggers_download(monkeypatch: pytest.MonkeyPatch) -> None:
+    downloaded = pd.DataFrame({"Adj Close": [110.0]}, index=pd.to_datetime(["2024-02-01"]))
+    monkeypatch.setattr(app, "load_cached_ticker", lambda ticker: (_ for _ in ()).throw(ValueError("corrupt cache")))
+    monkeypatch.setattr(app, "download_one_ticker", lambda *args, **kwargs: downloaded)
+    result = app.get_ticker_data("TEST", "2024-01-01", "2024-03-01")
+    pd.testing.assert_frame_equal(result, downloaded)
