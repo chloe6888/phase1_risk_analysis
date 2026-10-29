@@ -101,8 +101,8 @@ def test_add_scenarios_flags_budget_violations_without_hiding_them() -> None:
         entry_prices=[75, 120], add_share_counts=[1, 5], stress_prices=[],
         max_add_cash=100, max_total_shares=12,
     )
-    assert result.loc[(result.entry_price == 250) & (result.add_shares == 1), "within_budget"].iloc[0]
-    assert not result.loc[(result.entry_price == 300) & (result.add_shares == 5), "within_budget"].iloc[0]
+    assert result.loc[(result.entry_price == 75) & (result.add_shares == 1), "within_budget"].iloc[0]
+    assert not result.loc[(result.entry_price == 120) & (result.add_shares == 5), "within_budget"].iloc[0]
 
 
 def test_position_summary_rejects_non_finite_inputs() -> None:
