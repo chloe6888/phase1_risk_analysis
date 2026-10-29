@@ -96,8 +96,9 @@ def test_subgroup_limit_is_separate_from_broad_risk_group_limit() -> None:
     frame = pd.DataFrame([
         {"ticker":"MU","shares":3,"average_cost":100,"snapshot_price":100,"risk_group":"semiconductor_related","subgroup":"memory"},
         {"ticker":"SKHY","shares":20,"average_cost":100,"snapshot_price":100,"risk_group":"semiconductor_related","subgroup":"memory"},
-        {"ticker":"GOOG","shares":10,"average_cost":100,"snapshot_price":100,"risk_group":"internet_platform","subgroup":"search_cloud_ai"},
-        {"ticker":"OKTA","shares":10,"average_cost":100,"snapshot_price":100,"risk_group":"enterprise_security","subgroup":"identity_security_software"},
+        {"ticker":"LRCX","shares":10,"average_cost":100,"snapshot_price":100,"risk_group":"semiconductor_related","subgroup":"semiconductor_equipment"},
+        {"ticker":"GOOG","shares":25,"average_cost":100,"snapshot_price":100,"risk_group":"internet_platform","subgroup":"search_cloud_ai"},
+        {"ticker":"OKTA","shares":25,"average_cost":100,"snapshot_price":100,"risk_group":"enterprise_security","subgroup":"identity_security_software"},
     ])
     positions, _ = app.summarize_holdings(frame)
     alerts = app.risk_guardrail_alerts(positions, risk_group_limit_pct=45, subgroup_limit_pct=25)
