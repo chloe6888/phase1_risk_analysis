@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from holdings_manager import load_holdings, summarize_holdings, risk_guardrail_alerts
 
 try:
     import streamlit as st
@@ -19,6 +20,7 @@ except ImportError:  # keep helper functions importable in minimal/test environm
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "outputs"
 PIPELINE_SCRIPT = ROOT / "run_research.py"
+PRIVATE_HOLDINGS_PATH = ROOT / "data" / "private" / "holdings_snapshot.csv"
 
 
 def read_json(path: str | Path) -> dict[str, Any] | None:
@@ -56,6 +58,10 @@ def output_status(output_dir: str | Path = OUTPUT_DIR) -> dict[str, bool]:
         "backtest_equity_curve.csv",
         "strategy_validation_metadata.json",
         "walk_forward_summary.json",
+        "holdings_summary.json",
+        "holdings_valuation.csv",
+        "holdings_latest_price_weights.csv",
+        "holdings_risk_alerts.json",
         "research_report.md",
     ]
     return {name: (directory / name).is_file() for name in names}
@@ -63,8 +69,9 @@ def output_status(output_dir: str | Path = OUTPUT_DIR) -> dict[str, bool]:
 
 def make_pipeline_command(
     *,
-    weights: str,
+    weights: str | None,
     test_start: date | str,
+    holdings_csv: str | Path | None = None,
     benchmark: str = "SPY",
     lookbacks: str = "63,126,252",
     skip_recents: str = "5,21",
@@ -83,9 +90,14 @@ def make_pipeline_command(
 ) -> list[str]:
     """Build a safe argv list; never uses shell=True."""
     start = test_start.isoformat() if isinstance(test_start, date) else str(test_start)
-    command = [
-        sys.executable, str(PIPELINE_SCRIPT),
-        "--weights", weights,
+    if bool(weights and weights.strip()) == bool(holdings_csv):
+        raise ValueError("Provide exactly one of manual weights or imported holdings CSV.")
+    command = [sys.executable, str(PIPELINE_SCRIPT)]
+    if holdings_csv:
+        command += ["--holdings-csv", str(holdings_csv)]
+    else:
+        command += ["--weights", str(weights).strip()]
+    command += [
         "--test-start", start,
         "--benchmark", benchmark,
         "--lookbacks", lookbacks,
@@ -134,10 +146,16 @@ def main() -> None:
     status = output_status()
     with st.sidebar:
         st.header("运行研究")
-        st.caption("提交后会实际运行数据更新和量化分析脚本。首次下载行情需要网络。")
+        st.caption("提交后会实际运行数据更新和量化分析脚本。首次下载行情需要网络。持仓文件保存在本机 data/private/，该目录已加入 Git 忽略规则。")
         with st.form("research_run_form"):
-            weights = st.text_input("组合目标权重", value="", placeholder="GOOGL=0.60,SPY=0.40",
-                                    help="填写真实组合目标权重，程序会在计算时归一化。不要提交账户号码或其他秘密。")
+            uploaded_holdings = st.file_uploader("导入当前持仓 CSV（ticker, shares, average_cost, snapshot_price）", type=["csv"])
+            use_imported_holdings = st.checkbox(
+                "使用导入持仓自动计算组合权重",
+                value=PRIVATE_HOLDINGS_PATH.is_file(),
+                help="导入持仓用于组合权重和风险分析；股数、成本和价格仍需与券商端核对。",
+            )
+            weights = st.text_input("手工组合目标权重（不使用导入文件时填写）", value="", placeholder="GOOG=0.60,SPY=0.40",
+                                    help="可使用 ticker=weight,... 格式。不要提交账户号码或其他秘密。")
             benchmark = st.text_input("基准标的", value="SPY").strip().upper() or "SPY"
             test_start = st.date_input("单次样本外起始日期", value=date(2023, 1, 1))
             lookbacks = st.text_input("参数验证：回看窗口", value="63,126,252")
@@ -156,11 +174,23 @@ def main() -> None:
             submitted = st.form_submit_button("运行完整研究流程", type="primary", use_container_width=True)
 
     if submitted:
-        if not weights.strip():
-            st.sidebar.error("请先填写组合权重，例如 GOOGL=0.60,SPY=0.40。")
+        imported_path = None
+        if uploaded_holdings is not None:
+            PRIVATE_HOLDINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            PRIVATE_HOLDINGS_PATH.write_bytes(uploaded_holdings.getvalue())
+            imported_path = PRIVATE_HOLDINGS_PATH
+        elif use_imported_holdings and PRIVATE_HOLDINGS_PATH.is_file():
+            imported_path = PRIVATE_HOLDINGS_PATH
+
+        if use_imported_holdings and imported_path is None:
+            st.sidebar.error("请先上传持仓 CSV，或将文件放在 data/private/holdings_snapshot.csv。")
+        elif not use_imported_holdings and not weights.strip():
+            st.sidebar.error("请填写手工组合权重，或勾选使用导入持仓自动计算权重。")
         else:
             command = make_pipeline_command(
-                weights=weights.strip(), test_start=test_start, benchmark=benchmark,
+                weights=None if use_imported_holdings else weights.strip(),
+                holdings_csv=imported_path if use_imported_holdings else None,
+                test_start=test_start, benchmark=benchmark,
                 lookbacks=lookbacks.strip(), skip_recents=skips.strip(), top_ns=top_ns.strip(),
                 train_window=int(train_window), test_window=int(test_window),
                 transaction_cost_bps=float(cost_bps), slippage_bps=float(slippage_bps),
@@ -187,6 +217,16 @@ def main() -> None:
                             st.text("错误信息")
                             st.code(result.stderr[-12000:], language="text")
 
+    imported_positions = None
+    imported_alerts = []
+    if PRIVATE_HOLDINGS_PATH.is_file():
+        try:
+            imported_snapshot = load_holdings(PRIVATE_HOLDINGS_PATH)
+            imported_positions, _imported_summary = summarize_holdings(imported_snapshot)
+            imported_alerts = risk_guardrail_alerts(imported_positions)
+        except Exception as exc:
+            st.error(f"本地持仓文件无法解析：{exc}")
+
     data_meta = read_json(OUTPUT_DIR / "analysis_metadata.json")
     portfolio = read_json(OUTPUT_DIR / "portfolio_risk_summary.json")
     backtest = read_json(OUTPUT_DIR / "backtest_summary.json")
@@ -200,6 +240,22 @@ def main() -> None:
         )
     else:
         st.info("尚无分析结果。请在左侧填写组合目标权重并运行研究流程，或先在终端运行 run_research.py。")
+
+    if imported_positions is not None:
+        st.subheader("已导入的持仓（截图参考价格）")
+        st.caption("这里先显示导入 CSV 中的截图参考价；运行完整研究流程后，可在最新估值结果中查看行情数据源的最近收盘价。")
+        st.dataframe(
+            imported_positions[["ticker", "name", "shares", "average_cost", "snapshot_price", "market_value", "unrealized_pnl", "unrealized_return_pct", "weight_pct"]],
+            hide_index=True, use_container_width=True,
+        )
+        if imported_alerts:
+            for alert in imported_alerts:
+                st.warning(alert["message"])
+        snapshot_reconciliation = read_json(OUTPUT_DIR / "holdings_reconciliation.json")
+        if snapshot_reconciliation and not snapshot_reconciliation.get("within_tolerance", True):
+            st.warning(
+                "导入持仓汇总与券商总额未在容差内对齐。请核对股数、报价时间、截图遗漏持仓、费用和汇总口径后，再依赖组合风险结果。"
+            )
 
     if portfolio:
         st.subheader("组合风险概览")
