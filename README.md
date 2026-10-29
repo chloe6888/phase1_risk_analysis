@@ -27,6 +27,13 @@
     ├── data/raw/       # 本地行情缓存；CSV 默认不提交
     └── outputs/        # 运行后生成的表格与图片；默认不提交
 
+## 获取项目
+
+```bash
+git clone https://github.com/chloe6888/phase1_risk_analysis.git
+cd phase1_risk_analysis
+```
+
 ## 环境要求
 
 - Python 3.10 或更高版本
