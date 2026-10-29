@@ -108,3 +108,22 @@ def test_add_scenarios_flags_budget_violations_without_hiding_them() -> None:
 def test_position_summary_rejects_non_finite_inputs() -> None:
     with pytest.raises(ValueError, match="finite"):
         app.position_summary(shares=13, average_cost=float("nan"), current_price=290)
+
+
+def test_staged_plan_rejects_stress_loss_limit_breach() -> None:
+    with pytest.raises(ValueError, match="stress-loss limit"):
+        app.build_staged_plan(
+            shares=13, average_cost=306, reference_price=290,
+            tranche_prices=[290], tranche_shares=[2], stress_prices=[220],
+            max_stress_loss_pct=0.10,
+        )
+
+
+def test_independent_scenarios_flag_stress_loss_limit_breach() -> None:
+    result = app.build_add_scenarios(
+        shares=13, average_cost=306, reference_price=290,
+        entry_prices=[290], add_share_counts=[2], stress_prices=[220],
+        max_stress_loss_pct=0.10,
+    )
+    assert not result.loc[0, "within_budget"]
+    assert "stress price" in result.loc[0, "budget_reason"]
