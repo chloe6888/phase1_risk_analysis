@@ -274,6 +274,17 @@ def main() -> None:
         ["总览", "组合风险", "策略回测", "稳健性验证", "结果文件"]
     )
     with overview_tab:
+        latest_holdings = read_csv(OUTPUT_DIR / "holdings_valuation.csv")
+        latest_valuation_meta = read_csv(OUTPUT_DIR / "holdings_latest_price_weights.csv")
+        if latest_holdings is not None and not latest_holdings.empty:
+            st.markdown("### 最新可用收盘价估值（非实时成交价）")
+            columns = [name for name in (
+                "ticker", "shares", "average_cost", "reference_price", "market_value",
+                "unrealized_pnl", "unrealized_return_pct", "weight_pct", "risk_group", "subgroup",
+            ) if name in latest_holdings.columns]
+            st.dataframe(latest_holdings[columns], hide_index=True, use_container_width=True)
+            if latest_valuation_meta is not None and "price_date" in latest_valuation_meta.columns:
+                st.caption("各持仓的价格日期见“结果文件”中的 holdings_latest_price_weights.csv。")
         if portfolio:
             st.markdown("### 组合风险指标")
             risk_table = pd.DataFrame([
