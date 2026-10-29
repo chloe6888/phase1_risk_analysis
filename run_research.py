@@ -12,8 +12,9 @@ from typing import Any
 
 import pandas as pd
 
-from portfolio_risk import DEFAULT_OUTPUT_DIR, parse_scenario
+from portfolio_risk import DEFAULT_OUTPUT_DIR, load_price_panel, parse_scenario
 from strategy_validation import parse_int_list
+from holdings_manager import load_holdings, summarize_holdings, weights_from_price_panel, risk_guardrail_alerts, reconcile_snapshot
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = DEFAULT_OUTPUT_DIR
@@ -64,6 +65,9 @@ def render_report(
     backtest: dict[str, Any] | None,
     validation: dict[str, Any] | None,
     walk_forward: dict[str, Any] | None,
+    holdings_summary: dict[str, Any] | None = None,
+    holdings_alerts: list[dict[str, Any]] | None = None,
+    holdings_reconciliation: dict[str, Any] | None = None,
 ) -> str:
     lines = [
         "# Personal Quantitative Research Report",
@@ -81,6 +85,42 @@ def render_report(
             f"- Requested dates: {data.get('requested_start', 'N/A')} to {data.get('requested_end_exclusive', 'N/A')} (end exclusive)",
             f"- Last date per ticker: {json.dumps(data.get('data_last_dates', {}), ensure_ascii=False)}", "",
         ]
+    if holdings_summary:
+        lines += [
+            "## Imported holdings and concentration controls", "",
+            f"- Positions: {holdings_summary.get('position_count', 'N/A')}",
+            f"- Latest-price market value: {fmt_num(holdings_summary.get('market_value'), 2)} {holdings_summary.get('currency', '')}",
+            f"- Reconstructed cost basis: {fmt_num(holdings_summary.get('cost_basis'), 2)} {holdings_summary.get('currency', '')}",
+            f"- Unrealized P/L at latest available closes: {fmt_num(holdings_summary.get('unrealized_pnl'), 2)} {holdings_summary.get('currency', '')} ({fmt_pct(float(holdings_summary.get('unrealized_return_pct', 0.0)) / 100.0)})",
+            f"- Largest position: {holdings_summary.get('largest_position_ticker', 'N/A')} ({fmt_pct(float(holdings_summary.get('largest_position_weight_pct', 0.0)) / 100.0)})",
+            f"- Largest risk group: {holdings_summary.get('largest_risk_group', 'N/A')} ({fmt_pct(float(holdings_summary.get('largest_risk_group_weight_pct', 0.0)) / 100.0)})", "",
+        ]
+        theme_exposures = holdings_summary.get("risk_group_exposures_pct", {})
+        subgroup_exposures = holdings_summary.get("subgroup_exposures_pct", {})
+        if theme_exposures:
+            lines.append("- Risk theme exposure: " + "; ".join(f"{name}: {float(weight):.1f}%" for name, weight in theme_exposures.items()))
+        if subgroup_exposures:
+            lines.append("- Industry exposure: " + "; ".join(f"{name}: {float(weight):.1f}%" for name, weight in subgroup_exposures.items()))
+        lines.append("")
+        if holdings_reconciliation:
+            lines.extend([
+                "### Snapshot reconciliation", "",
+                f"- Calculated market value minus broker summary: {fmt_num(holdings_reconciliation.get('market_value_delta'), 2)}",
+                f"- Calculated P/L minus broker summary: {fmt_num(holdings_reconciliation.get('unrealized_pnl_delta'), 2)}",
+                f"- Broker-reported daily P/L (snapshot only): {fmt_num(holdings_reconciliation.get('reported_today_pnl'), 2)}",
+                f"- Reconciled within configured tolerance: {'Yes' if holdings_reconciliation.get('within_tolerance') else 'No — verify shares, price timestamps, hidden positions, and fees'}", "",
+            ])
+        if holdings_alerts:
+            lines.extend(["### Concentration review flags", ""])
+            for alert in holdings_alerts:
+                lines.append(f"- **{alert.get('level', 'info')}** {alert.get('message', '')}")
+            lines.append("")
+        else:
+            lines.extend(["- No position/group concentration threshold was breached in the imported holdings snapshot.", ""])
+        lines.extend([
+            "Weights are calculated among imported equity/ETF positions only; cash, bonds, other accounts, FX liabilities, and margin financing are not included unless separately imported.",
+            "Latest raw closes are historical valuation references, not live executable quotes. Confirm every share quantity and latest-price date before acting.", "",
+        ])
     if portfolio:
         lines += [
             "## Portfolio risk", "",
@@ -90,6 +130,7 @@ def render_report(
             f"| Historical one-period VaR | {fmt_pct(portfolio.get('historical_var_one_period'))} |",
             f"| Historical one-period CVaR | {fmt_pct(portfolio.get('historical_cvar_one_period'))} |", "",
             "VaR/CVaR are historical one-period estimates, not maximum-loss guarantees.", "",
+            *(["Warning: fewer than 252 common return observations; annualized portfolio risk estimates are based on a short history."] if int(portfolio.get("observations", 0)) < 252 else []),
         ]
     if backtest:
         strategy, base = backtest.get("strategy", {}), backtest.get("benchmark", {})
@@ -160,9 +201,15 @@ def write_report(output_dir: Path, *, weights: str, benchmark: str) -> Path:
     backtest = read_json(output_dir / "backtest_summary.json")
     validation = read_json(output_dir / "strategy_validation_metadata.json")
     walk_forward = read_json(output_dir / "walk_forward_summary.json")
+    holdings_summary = read_json(output_dir / "holdings_summary.json")
+    alerts_payload = read_json(output_dir / "holdings_risk_alerts.json")
+    reconciliation = read_json(output_dir / "holdings_reconciliation.json")
     report = render_report(
         generated_at=datetime.now(timezone.utc).isoformat(), weights=weights, benchmark=benchmark,
         data=data, portfolio=portfolio, backtest=backtest, validation=validation, walk_forward=walk_forward,
+        holdings_summary=holdings_summary,
+        holdings_alerts=(alerts_payload or {}).get('alerts', []),
+        holdings_reconciliation=reconciliation,
     )
     path = output_dir / "research_report.md"
     path.write_text(report, encoding="utf-8")
@@ -176,7 +223,8 @@ def run_step(title: str, command: list[str]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the full offline/online personal quant research pipeline.")
-    parser.add_argument("--weights", required=True, help="Target portfolio weights such as GOOGL=0.6,SPY=0.4")
+    parser.add_argument("--weights", default=None, help="Target portfolio weights such as GOOGL=0.6,SPY=0.4")
+    parser.add_argument("--holdings-csv", type=Path, default=None, help="Private holdings CSV; if given, weights are calculated from latest validated prices")
     parser.add_argument("--test-start", required=True, help="Inclusive single-split out-of-sample start date")
     parser.add_argument("--benchmark", default="SPY")
     parser.add_argument("--refresh", action="store_true", help="Force-refresh market data")
@@ -199,6 +247,10 @@ def main() -> None:
                         help="Repeatable NAME:TICKER=return[,TICKER=return...] stress case")
     parser.add_argument("--skip-walk-forward", action="store_true", help="Skip walk-forward when history is too short")
     args = parser.parse_args()
+    if bool(args.weights) == bool(args.holdings_csv):
+        parser.error("Provide exactly one of --weights or --holdings-csv.")
+    if args.holdings_csv is not None and not args.holdings_csv.is_file():
+        parser.error(f"Holdings CSV does not exist: {args.holdings_csv}")
     if args.max_cache_age_hours <= 0:
         parser.error("--max-cache-age-hours must be positive.")
     if args.transaction_cost_bps < 0 or args.slippage_bps < 0:
@@ -209,14 +261,52 @@ def main() -> None:
         parser.error("Train and test windows must be at least two observations.")
 
     py = sys.executable
+    imported_holdings = load_holdings(args.holdings_csv) if args.holdings_csv else None
     data_cmd = [py, str(ROOT / "phase1_risk_analysis.py"), "--max-cache-age-hours", str(args.max_cache_age_hours)]
+    if imported_holdings is not None:
+        required = sorted(set(["SPY", "SOXX", "NVDA"] + imported_holdings["ticker"].tolist()))
+        data_cmd += ["--tickers", ",".join(required)]
     if args.refresh:
         data_cmd.append("--refresh")
     if args.allow_stale_cache:
         data_cmd.append("--allow-stale-cache")
     run_step("1/5 Data download, cache, and validation", data_cmd)
 
-    risk_cmd = [py, str(ROOT / "portfolio_risk.py"), "--weights", args.weights, "--risk-free-rate", str(args.risk_free_rate)]
+    weights_text = args.weights
+    holdings_value = None
+    if imported_holdings is not None:
+        price_panel = load_price_panel(ROOT / "data" / "raw" / "close_price_panel.csv")
+        calculated_weights, latest_valuation = weights_from_price_panel(imported_holdings, price_panel)
+        weights_text = ",".join(f"{ticker}={weight:.12f}" for ticker, weight in calculated_weights.items())
+        latest_prices = dict(zip(latest_valuation["ticker"], latest_valuation["price"]))
+        valued_positions, current_holdings_summary = summarize_holdings(imported_holdings, reference_prices=latest_prices)
+        snapshot_positions, snapshot_summary = summarize_holdings(imported_holdings)
+        valued_positions.to_csv(OUTPUT_DIR / "holdings_valuation.csv", index=False, float_format="%.10f")
+        latest_valuation.to_csv(OUTPUT_DIR / "holdings_latest_price_weights.csv", index=False, float_format="%.10f")
+        (OUTPUT_DIR / "holdings_summary.json").write_text(
+            json.dumps(current_holdings_summary, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+        )
+        alerts = risk_guardrail_alerts(valued_positions)
+        (OUTPUT_DIR / "holdings_risk_alerts.json").write_text(
+            json.dumps({"alerts": alerts}, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+        )
+        snapshot_meta_path = Path(str(args.holdings_csv) + ".meta.json")
+        snapshot_meta = read_json(snapshot_meta_path) if snapshot_meta_path.exists() else {}
+        reconciliation = reconcile_snapshot(
+            float(snapshot_summary["market_value"]), float(snapshot_summary["unrealized_pnl"]),
+            reported_market_value=snapshot_meta.get("reported_market_value"),
+            reported_unrealized_pnl=snapshot_meta.get("reported_unrealized_pnl"),
+            tolerance=float(snapshot_meta.get("reconciliation_tolerance", 1.0)),
+        )
+        reconciliation["reported_today_pnl"] = snapshot_meta.get("reported_today_pnl")
+        (OUTPUT_DIR / "holdings_reconciliation.json").write_text(
+            json.dumps(reconciliation, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+        )
+        holdings_value = float(current_holdings_summary["market_value"])
+        if args.portfolio_value is None:
+            args.portfolio_value = holdings_value
+
+    risk_cmd = [py, str(ROOT / "portfolio_risk.py"), "--weights", weights_text, "--risk-free-rate", str(args.risk_free_rate)]
     if args.portfolio_value is not None:
         risk_cmd += ["--portfolio-value", str(args.portfolio_value)]
     for name, shocks in args.stress_scenario:
@@ -251,10 +341,10 @@ def main() -> None:
         ]
         run_step("5/5 Rolling walk-forward validation", walk_cmd)
 
-    report_path = write_report(OUTPUT_DIR, weights=args.weights, benchmark=args.benchmark)
+    report_path = write_report(OUTPUT_DIR, weights=weights_text, benchmark=args.benchmark)
     manifest = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "benchmark": args.benchmark, "portfolio_weights": args.weights, "single_split_test_start": args.test_start,
+        "benchmark": args.benchmark, "portfolio_weights": weights_text, "single_split_test_start": args.test_start,
         "parameters": {
             "lookbacks": args.lookbacks, "skip_recents": args.skip_recents, "top_ns": args.top_ns,
             "backtest_lookback": args.backtest_lookback, "backtest_skip_recent": args.backtest_skip_recent,
@@ -262,6 +352,8 @@ def main() -> None:
             "selection_metric": args.selection_metric, "transaction_cost_bps": args.transaction_cost_bps,
             "slippage_bps": args.slippage_bps, "risk_free_rate": args.risk_free_rate,
             "has_portfolio_value": args.portfolio_value is not None,
+            "holdings_csv_imported": imported_holdings is not None,
+            "holdings_snapshot_positions": int(len(imported_holdings)) if imported_holdings is not None else 0,
             "stress_case_names": [name for name, _ in args.stress_scenario],
             "walk_forward_enabled": not args.skip_walk_forward,
         },

@@ -74,3 +74,24 @@ def test_streamlit_dashboard_initializes_without_existing_outputs() -> None:
     assert not page.exception
     assert page.title
     assert page.title[0].value == "个人量化研究系统"
+
+
+def test_make_pipeline_command_uses_imported_holdings_instead_of_manual_weights() -> None:
+    command = app.make_pipeline_command(
+        weights=None,
+        holdings_csv="data/private/holdings_snapshot.csv",
+        test_start="2023-01-01",
+        benchmark="SPY",
+    )
+    assert "--holdings-csv" in command
+    assert command[command.index("--holdings-csv") + 1] == "data/private/holdings_snapshot.csv"
+    assert "--weights" not in command
+
+
+def test_make_pipeline_command_rejects_both_or_neither_portfolio_inputs() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="exactly one"):
+        app.make_pipeline_command(weights=None, holdings_csv=None, test_start="2023-01-01")
+    with pytest.raises(ValueError, match="exactly one"):
+        app.make_pipeline_command(weights="SPY=1", holdings_csv="data/private/holdings.csv", test_start="2023-01-01")

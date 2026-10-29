@@ -14,6 +14,7 @@
 - 支持滚动 walk-forward：每个测试窗口只用之前的训练窗口选择参数，并输出连续、互不重叠的样本外收益序列。
 - 通过统一入口按顺序运行数据、组合风险、基准回测、参数验证和滚动验证，并生成汇总研究报告与运行清单。
 - 提供只在本机读取研究产物的 Streamlit 仪表盘，可查看组合风险、策略净值、参数实验、walk-forward 和综合报告，并从侧边栏提交研究任务。
+- 支持导入本地持仓 CSV，按持股数量与最新可用收盘价计算市值和组合权重，并检测单一仓位和主题集中度；持仓文件被 Git 忽略，不提交到公开仓库。
 - 计算 20/60/120 个观测窗口的滚动波动率和回撤，并支持自定义压力情景。
 - 输出相关矩阵及每一对资产的共同观测数量。
 - 输出最大回撤的峰值/谷值/恢复日期，以及每次分析的数据截止时间。
@@ -37,7 +38,10 @@
     ├── walk_forward_validation.py
     ├── run_research.py
     ├── dashboard.py
+    ├── holdings_manager.py
     ├── requirements-dashboard.txt
+    ├── start_dashboard.sh
+    ├── start_dashboard.ps1
     ├── tests/
     │   ├── test_phase1_risk_analysis.py
     │   ├── test_position_scenarios.py
@@ -46,10 +50,12 @@
     │   ├── test_strategy_validation.py
     │   ├── test_walk_forward_validation.py
     │   ├── test_run_research.py
-    │   └── test_dashboard.py
+    │   ├── test_dashboard.py
+    │   └── test_holdings_manager.py
     ├── .github/workflows/tests.yml
+    ├── data/private/   # 个人持仓导入文件；禁止提交到公开仓库
     ├── data/raw/       # 本地行情缓存；CSV 默认不提交
-    └── outputs/        # 运行后生成的表格与图片；默认不提交
+    └── outputs/        # 运行后生成的表格、图片和报告；默认不提交
 
 ## 获取项目
 
@@ -110,7 +116,8 @@ python phase1_risk_analysis.py --allow-stale-cache
 |---|---|
 | `data/raw/<TICKER>_daily.csv` | 各标的整理后的行情缓存，包含可用 OHLCV 和公司行为字段 |
 | `data/raw/<TICKER>_daily.meta.json` | 缓存来源、请求日期范围、下载时间、有效数据起止日和行数 |
-| `data/raw/adjusted_close_panel.csv` | 调整收盘价面板 |
+| `data/raw/adjusted_close_panel.csv` | 历史总收益风险分析使用的调整收盘价面板 |
+| `data/raw/close_price_panel.csv` | 按实际持股数量估值使用的未调整收盘价面板 |
 | `outputs/data_quality_report.csv` | 数据完整性摘要 |
 | `outputs/daily_returns.csv` | 调整收盘价计算的日收益率 |
 | `outputs/risk_metrics.csv` | CAGR、年化波动率、最大回撤和 Beta 等指标 |
@@ -138,6 +145,11 @@ python phase1_risk_analysis.py --allow-stale-cache
 | `outputs/walk_forward_folds.csv` | 每轮训练区间、测试区间、训练选出的参数及样本外结果 |
 | `outputs/walk_forward_oos_returns.csv` | 各轮拼接后的非重叠样本外收益序列 |
 | `outputs/walk_forward_summary.json` | walk-forward 总体样本外表现和验证口径 |
+| `outputs/holdings_valuation.csv` | 按最新有效未调整收盘价估算的持仓市值、成本和盈亏 |
+| `outputs/holdings_latest_price_weights.csv` | 每只持仓最近可用价格日期、市值与组合权重 |
+| `outputs/holdings_summary.json` | 导入持仓的整体市值、成本和集中度摘要 |
+| `outputs/holdings_reconciliation.json` | 导入持仓行合计与券商汇总金额之间的差异 |
+| `outputs/holdings_risk_alerts.json` | 单一持仓与风险主题集中度提醒 |
 | `outputs/research_report.md` | 汇总数据覆盖、组合风险、基准回测和样本外验证的报告 |
 | `outputs/research_run_manifest.json` | 本次研究使用的参数和运行记录（保存在本地输出目录，不提交到仓库） |
 
@@ -199,7 +211,7 @@ python strategy_validation.py \
 
 ```bash
 python run_research.py \
-  --weights GOOGL=0.60,SPY=0.40 \
+  --holdings-csv data/private/holdings_snapshot.csv \
   --test-start 2023-01-01 \
   --lookbacks 63,126,252 \
   --skip-recents 5,21 \
@@ -214,16 +226,27 @@ python run_research.py \
 
 研究结果写入 `outputs/`，包括 `research_report.md` 和 `research_run_manifest.json`。请先阅读报告中的数据覆盖、成本口径与局限，再解读收益数字。
 
+## 导入个人持仓
+
+持仓 CSV 的必需列为 `ticker,shares,average_cost,snapshot_price`；可选列为 `name,risk_group,subgroup,currency,notes,quantity_source`。股票数量、平均成本和截图参考价应来自自己的券商记录，数据文件放在 `data/private/holdings_snapshot.csv`，该目录已被 `.gitignore` 排除。
+
+通过一键入口导入后，程序会根据持仓代码下载并检查历史行情，用最近有效的未调整收盘价估算市值与组合权重，生成成本/盈亏表和单一仓位集中度提醒。如果同目录存在 `holdings_snapshot.csv.meta.json`，程序还会把行项目合计与券商截图总额对账，明确显示差异，而不是静默消除。
+
+**重要：** 股数必须与券商端核实。截图没有直接显示持股数量时，不应仅凭反推数字执行交易。最近历史收盘价不是实时可成交报价；现金、债券、其他账户、汇率及融资负债未导入时，权重只代表导入的股票/ETF 仓位。
+
 ## 本地仪表盘
 
 安装可选依赖后，在项目根目录运行：
 
 ```bash
-python -m pip install -r requirements-dashboard.txt
-python -m streamlit run dashboard.py
+# macOS / Linux
+bash start_dashboard.sh
+
+# Windows PowerShell
+.\start_dashboard.ps1
 ```
 
-仪表盘从 `outputs/` 读取已有结果；首次使用时可在左侧填写组合权重、样本外日期、成本假设和验证窗口后运行完整研究流程。它默认仅用于本机交互，不执行真实交易，也不会因为打开页面就自动下载行情。请不要将本地服务直接暴露到公网；若需要多人或公网访问，必须先部署身份认证、授权与数据隔离。
+仪表盘从 `outputs/` 读取已有结果；可在侧边栏上传个人持仓 CSV，文件会保存在已忽略的 `data/private/` 文件夹。勾选“使用导入持仓自动计算组合权重”后即可启动完整研究流程，也可手工填写权重。它默认仅用于本机交互，不执行真实交易，也不会因为打开页面就自动下载行情。请不要将本地服务直接暴露到公网；若需要多人或公网访问，必须先部署身份认证、授权与数据隔离。
 
 ## 滚动 Walk-forward 验证
 

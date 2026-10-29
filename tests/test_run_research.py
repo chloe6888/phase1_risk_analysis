@@ -79,3 +79,41 @@ def test_write_report_reads_machine_readable_outputs(tmp_path: Path) -> None:
     assert "SPY=1" in rendered
     assert "10.00%" in rendered
     assert "Historical one-period CVaR" in rendered
+
+
+def test_report_shows_imported_holdings_reconciliation_and_alerts() -> None:
+    report = app.render_report(
+        generated_at="2026-01-01T00:00:00+00:00",
+        weights="AAA=0.6,BBB=0.4",
+        benchmark="SPY",
+        data=None,
+        portfolio=None,
+        backtest=None,
+        validation=None,
+        walk_forward=None,
+        holdings_summary={
+            "position_count": 2,
+            "currency": "USD",
+            "market_value": 1000.0,
+            "cost_basis": 1020.0,
+            "unrealized_pnl": -20.0,
+            "unrealized_return_pct": -1.96,
+            "largest_position_ticker": "AAA",
+            "largest_position_weight_pct": 60.0,
+            "largest_risk_group": "semiconductor_related",
+            "largest_risk_group_weight_pct": 100.0,
+        },
+        holdings_alerts=[{
+            "level": "warning", "message": "Risk theme 'semiconductor_related' weighs 100.0%.",
+        }],
+        holdings_reconciliation={
+            "market_value_delta": 1.5,
+            "unrealized_pnl_delta": 2.0,
+            "within_tolerance": False,
+        },
+    )
+    assert "Imported holdings and concentration controls" in report
+    assert "Snapshot reconciliation" in report
+    assert "verify shares" in report
+    assert "semiconductor_related" in report
+    assert "cash, bonds" in report
