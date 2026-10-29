@@ -12,6 +12,7 @@
 - 提供横截面动量 v1 策略、单期信号滞后、基准对比、交易成本/滑点假设和可复现回测输出。
 - 支持参数网格实验、样本内/样本外指标分离，以及按自然年拆分的策略表现审查。
 - 支持滚动 walk-forward：每个测试窗口只用之前的训练窗口选择参数，并输出连续、互不重叠的样本外收益序列。
+- 通过统一入口按顺序运行数据、组合风险、基准回测、参数验证和滚动验证，并生成汇总研究报告与运行清单。
 - 计算 20/60/120 个观测窗口的滚动波动率和回撤，并支持自定义压力情景。
 - 输出相关矩阵及每一对资产的共同观测数量。
 - 输出最大回撤的峰值/谷值/恢复日期，以及每次分析的数据截止时间。
@@ -33,13 +34,15 @@
     ├── backtest_engine.py
     ├── strategy_validation.py
     ├── walk_forward_validation.py
+    ├── run_research.py
     ├── tests/
     │   ├── test_phase1_risk_analysis.py
     │   ├── test_position_scenarios.py
     │   ├── test_portfolio_risk.py
     │   ├── test_backtest_engine.py
     │   ├── test_strategy_validation.py
-    │   └── test_walk_forward_validation.py
+    │   ├── test_walk_forward_validation.py
+    │   └── test_run_research.py
     ├── .github/workflows/tests.yml
     ├── data/raw/       # 本地行情缓存；CSV 默认不提交
     └── outputs/        # 运行后生成的表格与图片；默认不提交
@@ -131,6 +134,8 @@ python phase1_risk_analysis.py --allow-stale-cache
 | `outputs/walk_forward_folds.csv` | 每轮训练区间、测试区间、训练选出的参数及样本外结果 |
 | `outputs/walk_forward_oos_returns.csv` | 各轮拼接后的非重叠样本外收益序列 |
 | `outputs/walk_forward_summary.json` | walk-forward 总体样本外表现和验证口径 |
+| `outputs/research_report.md` | 汇总数据覆盖、组合风险、基准回测和样本外验证的报告 |
+| `outputs/research_run_manifest.json` | 本次研究使用的参数和运行记录（保存在本地输出目录，不提交到仓库） |
 
 ## 组合风险分析
 
@@ -183,6 +188,27 @@ python strategy_validation.py \
 ```
 
 程序会报告所有参数组合，不会自动选出“最优参数”。建议先依据训练期设定参数，再把测试期作为未参与挑选的评估区间；测试期结果一旦被反复用于选参数，就不再是真正独立的样本外证据。当前模块是单次时间切分和逐年报告，后续仍需加入滚动 walk-forward、更多资产池和策略失效条件审查。
+
+## 一键运行完整研究流程
+
+统一入口按顺序执行行情下载与数据检查、组合风险及压力测试、动量基准回测、参数网格验证和滚动 walk-forward，并在全部必需步骤成功后生成综合报告。例子中的权重、日期与冲击仅用于展示命令格式，请根据实际投资组合和想要的测试区间修改：
+
+```bash
+python run_research.py \
+  --weights GOOGL=0.60,SPY=0.40 \
+  --test-start 2023-01-01 \
+  --lookbacks 63,126,252 \
+  --skip-recents 5,21 \
+  --top-ns 1,2,3 \
+  --train-window 252 \
+  --test-window 63 \
+  --transaction-cost-bps 5 \
+  --slippage-bps 5
+```
+
+如果需要强制下载行情，可增加 `--refresh`。只有你明确接受旧数据回退风险时，才使用 `--allow-stale-cache`。历史不足以支持 walk-forward 时，可显式加 `--skip-walk-forward`；其余阶段仍会执行，但这次报告将不会包含滚动验证结果。执行中任一必需的子步骤失败，统一入口会停止，不会把不完整流程标记为成功。
+
+研究结果写入 `outputs/`，包括 `research_report.md` 和 `research_run_manifest.json`。请先阅读报告中的数据覆盖、成本口径与局限，再解读收益数字。
 
 ## 滚动 Walk-forward 验证
 
