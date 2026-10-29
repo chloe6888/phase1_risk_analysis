@@ -107,6 +107,7 @@ def render_report(
                 "### Snapshot reconciliation", "",
                 f"- Calculated market value minus broker summary: {fmt_num(holdings_reconciliation.get('market_value_delta'), 2)}",
                 f"- Calculated P/L minus broker summary: {fmt_num(holdings_reconciliation.get('unrealized_pnl_delta'), 2)}",
+                f"- Broker-reported daily P/L (snapshot only): {fmt_num(holdings_reconciliation.get('reported_today_pnl'), 2)}",
                 f"- Reconciled within configured tolerance: {'Yes' if holdings_reconciliation.get('within_tolerance') else 'No — verify shares, price timestamps, hidden positions, and fees'}", "",
             ])
         if holdings_alerts:
@@ -297,6 +298,7 @@ def main() -> None:
             reported_unrealized_pnl=snapshot_meta.get("reported_unrealized_pnl"),
             tolerance=float(snapshot_meta.get("reconciliation_tolerance", 1.0)),
         )
+        reconciliation["reported_today_pnl"] = snapshot_meta.get("reported_today_pnl")
         (OUTPUT_DIR / "holdings_reconciliation.json").write_text(
             json.dumps(reconciliation, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8"
         )
