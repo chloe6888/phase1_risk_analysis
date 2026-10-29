@@ -21,6 +21,7 @@
     ├── requirements-dev.txt
     ├── .gitignore
     ├── phase1_risk_analysis.py
+    ├── position_scenarios.py
     ├── tests/
     │   └── test_phase1_risk_analysis.py
     ├── .github/workflows/tests.yml
@@ -70,7 +71,7 @@ python phase1_risk_analysis.py --refresh
 
 在脚本顶部调整以下参数：
 
-- `TICKERS`：研究标的列表，默认 SPY、SOXX、NVDA。
+- `TICKERS`：研究标的列表，默认 SPY、SOXX、NVDA、GOOGL。
 - `BENCHMARK`：Beta 基准，默认 SPY，必须包含在 `TICKERS` 中。
 - `START_DATE`：下载起始日期，默认 2015-01-01。
 - `END_DATE`：默认取纽约当地当前日期，下载接口的结束日期不包含当天。
@@ -101,6 +102,26 @@ python phase1_risk_analysis.py --refresh
 - 缺失价格不会自动填充为零收益。若下载数据存在缺口，必须检查数据质量报告。
 - 当前版本不模拟交易成本、滑点、税费、做空约束或订单执行。
 - 当前三个标的不代表整个美股市场；历史最大回撤也不是未来损失上限。不要仅凭这些指标直接推导安全仓位。
+
+## 持仓加仓情景工具
+
+`position_scenarios.py` 用来计算现有持仓的市值、未实现盈亏、不同加仓价格下的新成本均价，以及在压力价格下的盈亏。不预测价格，也不自动生成买卖信号。个人持仓参数在运行时传入，不要把个人信息提交到公共仓库。
+
+示例：
+
+```bash
+python position_scenarios.py \
+  --ticker GOOGL \
+  --shares 10 \
+  --avg-cost 100 \
+  --price 95 \
+  --levels 95 90 85 80 \
+  --add-shares 1 2 3 \
+  --stress-prices 80 75 70 \
+  --history-csv data/raw/GOOGL_daily.csv
+```
+
+示例中的价格仅用于演示，运行前应换成当前可核验的报价和自己的持仓数据。指定 `--history-csv` 时，CSV 需包含 `Date` 索引以及 `Close` 或 `Adj Close` 列。程序会输出 CSV 至 `outputs/`。
 
 ## 自动化测试
 
