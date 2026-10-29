@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 REQUIRED_COLUMNS = {"ticker", "shares", "average_cost", "snapshot_price"}
-OPTIONAL_COLUMNS = {"name", "risk_group", "currency", "notes", "quantity_source"}
+OPTIONAL_COLUMNS = {"name", "risk_group", "subgroup", "currency", "notes", "quantity_source"}
 DEFAULT_CURRENCY = "USD"
 
 
@@ -49,6 +49,12 @@ def load_holdings(path_or_buffer: str | Path | object) -> pd.DataFrame:
     else:
         frame["risk_group"] = frame["risk_group"].fillna("unclassified").astype(str).str.strip().str.lower()
         frame.loc[frame["risk_group"].eq(""), "risk_group"] = "unclassified"
+    if "subgroup" not in frame:
+        frame["subgroup"] = frame["risk_group"]
+    else:
+        frame["subgroup"] = frame["subgroup"].fillna(frame["risk_group"]).astype(str).str.strip().str.lower()
+        mask = frame["subgroup"].eq("")
+        frame.loc[mask, "subgroup"] = frame.loc[mask, "risk_group"]
     if "currency" not in frame:
         frame["currency"] = DEFAULT_CURRENCY
     else:
@@ -102,6 +108,8 @@ def summarize_holdings(
     frame["weight_pct"] = frame["market_value"] / total_value * 100.0
     group_values = frame.groupby("risk_group", dropna=False)["market_value"].sum()
     group_weights = group_values / total_value * 100.0
+    subgroup_values = frame.groupby("subgroup", dropna=False)["market_value"].sum()
+    subgroup_weights = subgroup_values / total_value * 100.0
     top = frame.sort_values("weight_pct", ascending=False).iloc[0]
     summary: dict[str, float | int | str] = {
         "currency": str(frame["currency"].iloc[0]),
@@ -114,6 +122,8 @@ def summarize_holdings(
         "largest_position_weight_pct": float(top["weight_pct"]),
         "largest_risk_group": str(group_weights.idxmax()),
         "largest_risk_group_weight_pct": float(group_weights.max()),
+        "risk_group_exposures_pct": {str(key): float(value) for key, value in group_weights.items()},
+        "subgroup_exposures_pct": {str(key): float(value) for key, value in subgroup_weights.items()},
     }
     frame = frame.sort_values("market_value", ascending=False).reset_index(drop=True)
     return frame, summary
@@ -179,7 +189,7 @@ def risk_guardrail_alerts(
     single_position_limit_pct: float = 20.0,
     risk_group_limit_pct: float = 40.0,
 ) -> list[dict[str, str | float]]:
-    """Identify concentration-rule breaches; these are review prompts, not orders."""
+    """Identify concentration-rule breaches for single tickers, themes, and subgroups."""
     if not 0 < single_position_limit_pct <= 100:
         raise ValueError("single_position_limit_pct must be in (0, 100].")
     if not 0 < risk_group_limit_pct <= 100:
@@ -198,21 +208,27 @@ def risk_guardrail_alerts(
                     f"{single_position_limit_pct:.1f}% review threshold."
                 ),
             })
-    group_weights = positions.groupby("risk_group")["market_value"].sum() / positions["market_value"].sum() * 100.0
-    for group, weight in group_weights.items():
-        if float(weight) > risk_group_limit_pct:
-            alerts.append({
-                "level": "warning",
-                "kind": "risk_group_concentration",
-                "name": str(group),
-                "weight_pct": float(weight),
-                "message": (
-                    f"Risk group '{group}' weighs {float(weight):.1f}% of listed holdings, above the "
-                    f"{risk_group_limit_pct:.1f}% review threshold."
-                ),
-            })
+    for column, label, kind in (
+        ("risk_group", "risk theme", "risk_group_concentration"),
+        ("subgroup", "industry subgroup", "subgroup_concentration"),
+    ):
+        if column not in positions.columns:
+            continue
+        group_weights = positions.groupby(column)["market_value"].sum() / positions["market_value"].sum() * 100.0
+        for group, weight in group_weights.items():
+            if float(weight) > risk_group_limit_pct:
+                alerts.append({
+                    "level": "warning",
+                    "kind": kind,
+                    "group_type": label,
+                    "name": str(group),
+                    "weight_pct": float(weight),
+                    "message": (
+                        f"{label.capitalize()} '{group}' weighs {float(weight):.1f}% of listed holdings, above the "
+                        f"{risk_group_limit_pct:.1f}% review threshold."
+                    ),
+                })
     return alerts
-
 
 def reconcile_snapshot(
     calculated_market_value: float,
