@@ -467,6 +467,7 @@ def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_h
         print("Using local CSV cache when available; missing tickers will be downloaded.")
     raw_data: dict[str, pd.DataFrame] = {}
     series: dict[str, pd.Series] = {}
+    close_series: dict[str, pd.Series] = {}
 
     for ticker in active_tickers:
         print(f"Loading {ticker} ...")
@@ -476,6 +477,7 @@ def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_h
             raise RuntimeError(f"Download/validation failed for {ticker}: {exc}") from exc
         raw_data[ticker] = data
         series[ticker] = data["Adj Close"].rename(ticker).astype(float)
+        close_series[ticker] = data["Close"].rename(ticker).astype(float)
 
     data_quality = build_data_quality_report(raw_data)
     data_quality.to_csv(OUT_DIR / "data_quality_report.csv")
@@ -483,6 +485,9 @@ def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_h
     adjusted_close = pd.concat(series.values(), axis=1).sort_index()
     adjusted_close.index.name = "Date"
     adjusted_close.to_csv(RAW_DIR / "adjusted_close_panel.csv", float_format="%.8f")
+    close_panel = pd.concat(close_series.values(), axis=1).sort_index()
+    close_panel.index.name = "Date"
+    close_panel.to_csv(RAW_DIR / "close_price_panel.csv", float_format="%.8f")
 
     daily_returns = adjusted_close.pct_change(fill_method=None)
     daily_returns.to_csv(OUT_DIR / "daily_returns.csv", float_format="%.10f")
@@ -513,6 +518,7 @@ def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_h
         "max_cache_age_hours": max_cache_age_hours,
         "allow_stale_cache": allow_stale_cache,
         "return_price_field": "Adj Close",
+        "valuation_price_field": "Close",
     }
     (OUT_DIR / "analysis_metadata.json").write_text(
         json.dumps(analysis_metadata, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
