@@ -91,6 +91,14 @@ def summarize_holdings(
     frame = holdings.copy()
     if frame.empty:
         raise ValueError("At least one holding is required.")
+    if "currency" not in frame:
+        frame["currency"] = DEFAULT_CURRENCY
+    if "risk_group" not in frame:
+        frame["risk_group"] = "unclassified"
+    if "subgroup" not in frame:
+        frame["subgroup"] = frame["risk_group"]
+    if "name" not in frame:
+        frame["name"] = frame.get("ticker", "")
     prices: list[float] = []
     for row in frame.itertuples(index=False):
         reference = (reference_prices or {}).get(row.ticker, row.snapshot_price)
