@@ -42,24 +42,145 @@ def cache_metadata_path(ticker: str) -> Path:
 
 
 def validate_price_frame(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
-    """Normalize and validate daily data without silently repairing prices."""
+    """Normalize and validate downloaded/cached price data."""
+    if data is None or data.empty:
+        raise ValueError(f"{ticker}: price data is empty.")
+    data = data.copy()
+    data.index = pd.to_datetime(data.index)
+    if getattr(data.index, "tz", None) is not None:
+        data.index = data.index.tz_localize(None)
+    data.index.name = "Date"
+    if data.index.has_duplicates:
+        examples = data.index[data.index.duplicated()].strftime("%Y-%m-%d").tolist()
+        raise ValueError(f"{ticker}: duplicate dates found, examples: {examples[:5]}")
+    data = data.sort_index()
+    if "Adj Close" not in data.columns:
+        raise ValueError(f"{ticker}: missing required 'Adj Close' price column.")
+
+    data["Adj Close"] = pd.to_numeric(data["Adj Close"], errors="coerce")
+    valid_adj = data["Adj Close"].dropna()
+    if valid_adj.empty:
+        raise ValueError(f"{ticker}: no valid adjusted closing prices.")
+    if not np.isfinite(valid_adj.to_numpy(dtype=float)).all():
+        raise ValueError(f"{ticker}: adjusted closing prices contain non-finite values.")
+    if (valid_adj <= 0).any():
+        raise ValueError(f"{ticker}: adjusted closing prices contain non-positive values.")
+
+    for field in ("Open", "High", "Low", "Close"):
+        if field in data.columns:
+            data[field] = pd.to_numeric(data[field], errors="coerce")
+            values = data[field].dropna()
+            if (values <= 0).any():
+                raise ValueError(f"{ticker}: {field} contains non-positive prices.")
+    if {"High", "Low"}.issubset(data.columns):
+        both = data[["High", "Low"]].dropna()
+        if (both["High"] < both["Low"]).any():
+            raise ValueError(f"{ticker}: found OHLC rows where High is below Low.")
+    return data
+
+
+def cache_is_usable(
+    ticker: str,
+    data: pd.DataFrame,
+    start: str,
+    end: str,
+    max_age_hours: float = DEFAULT_MAX_CACHE_AGE_HOURS,
+    now: datetime | None = None,
+) -> tuple[bool, str]:
+    """Reject stale, truncated, legacy, or metadata-mismatched local cache."""
+    meta_path = cache_metadata_path(ticker)
+    if not meta_path.exists():
+        return False, "metadata missing (legacy cache)"
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        required = {
+            "ticker", "downloaded_at_utc", "requested_start", "requested_end",
+            "first_data_date", "last_data_date", "row_count",
+        }
+        missing = required.difference(meta)
+        if missing:
+            return False, f"cache metadata missing fields: {sorted(missing)}"
+        if max_age_hours <= 0:
+            return False, "max cache age must be positive"
+
+        fetched_at = datetime.fromisoformat(meta["downloaded_at_utc"].replace("Z", "+00:00"))
+        if fetched_at.tzinfo is None:
+            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+        now = now or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        age_hours = (now - fetched_at).total_seconds() / 3600
+        if age_hours < -1:
+            return False, "cache download timestamp is in the future"
+        if age_hours > max_age_hours:
+            return False, f"cache age {age_hours:.1f}h exceeds {max_age_hours:.1f}h"
+        if pd.Timestamp(meta["requested_start"]) > pd.Timestamp(start):
+            return False, "cache does not cover requested start date"
+        if pd.Timestamp(meta["requested_end"]) < pd.Timestamp(end):
+            return False, "cache request ended before requested end date"
+        earliest_allowed = pd.Timestamp(start) + pd.offsets.BDay(3)
+        latest_allowed = pd.Timestamp(end) - pd.offsets.BDay(2)
+        if data.empty or data.index.min() > earliest_allowed:
+            return False, "cached observations do not cover requested start date"
+        if data.index.max() < latest_allowed:
+            return False, "cached observations end too far before requested end date"
+        if meta["ticker"] != ticker:
+            return False, "cache metadata ticker mismatch"
+        valid_dates = data["Adj Close"].dropna().index
+        if valid_dates.empty:
+            return False, "cached adjusted close has no valid dates"
+        if valid_dates.min().date().isoformat() != meta["first_data_date"]:
+            return False, "cache metadata first data date does not match CSV"
+        if valid_dates.max().date().isoformat() != meta["last_data_date"]:
+            return False, "cache metadata last data date does not match CSV"
+        if int(meta["row_count"]) != len(data):
+            return False, "cache metadata row count does not match CSV"
+        return True, f"fresh cache ({age_hours:.1f}h old)"
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        return False, f"invalid cache metadata: {exc}"
+
+
+def download_one_ticker(ticker: str, start: str, end: str) -> pd.DataFrame:
+    """Download a ticker and save normalized data plus cache metadata."""
+    try:
+        import yfinance as yf
+    except ImportError as exc:
+        raise RuntimeError(
+            "Missing dependency yfinance. Install project dependencies with: "
+            "python -m pip install -r requirements.txt"
+        ) from exc
+
+    kwargs = dict(
+        tickers=ticker,
+        start=start,
+        end=end,
+        auto_adjust=False,
+        actions=True,
+        progress=False,
+        threads=False,
+        group_by="column",
+    )
+    try:
+        data = yf.download(**kwargs, multi_level_index=False)
+    except TypeError as exc:
+        if "multi_level_index" not in str(exc):
+            raise
+        data = yf.download(**kwargs)
     if data is None or data.empty:
         raise RuntimeError(
             f"No data returned for {ticker}. Check connectivity, ticker symbol, "
             "Yahoo Finance availability, or try again later."
         )
-
     if isinstance(data.columns, pd.MultiIndex):
         field_names = {
             "Open", "High", "Low", "Close", "Adj Close", "Volume",
-            "Dividends", "Stock Splits", "Capital Gains"
+            "Dividends", "Stock Splits", "Capital Gains",
         }
-        flattened = []
+        columns = []
         for col in data.columns:
             parts = [str(x) for x in col]
-            field = next((part for part in parts if part in field_names), parts[0])
-            flattened.append(field)
-        data.columns = flattened
+            columns.append(next((part for part in parts if part in field_names), parts[0]))
+        data.columns = columns
     data = data.loc[:, ~pd.Index(data.columns).duplicated()].copy()
     data = validate_price_frame(data, ticker)
 
@@ -71,8 +192,8 @@ def validate_price_frame(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
         "requested_start": start,
         "requested_end": end,
         "downloaded_at_utc": datetime.now(timezone.utc).isoformat(),
-        "first_data_date": data.index.min().date().isoformat(),
-        "last_data_date": data.index.max().date().isoformat(),
+        "first_data_date": data["Adj Close"].first_valid_index().date().isoformat(),
+        "last_data_date": data["Adj Close"].last_valid_index().date().isoformat(),
         "row_count": int(len(data)),
         "auto_adjust": False,
         "actions": True,
@@ -81,7 +202,6 @@ def validate_price_frame(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     return data
-
 
 
 def load_cached_ticker(ticker: str) -> pd.DataFrame | None:
@@ -101,11 +221,7 @@ def get_ticker_data(
     allow_stale_cache: bool = False,
     max_cache_age_hours: float = DEFAULT_MAX_CACHE_AGE_HOURS,
 ) -> pd.DataFrame:
-    """Use a cache only when recent and covering the requested date range.
-
-    Stale cache is refreshed automatically. With --allow-stale-cache, a failed
-    refresh may fall back to local data, but it emits an explicit warning.
-    """
+    """Use cache only when recent and covering the requested range."""
     cached = None if refresh else load_cached_ticker(ticker)
     cache_reason = "refresh requested" if refresh else "no local cache"
     if cached is not None:
@@ -119,7 +235,6 @@ def get_ticker_data(
             )
             return cached
         print(f"Cache for {ticker} is stale or incomplete: {cache_reason}; refreshing.")
-
     try:
         return download_one_ticker(ticker, start, end)
     except Exception as exc:
@@ -135,7 +250,6 @@ def get_ticker_data(
         ) from exc
 
 
-def compute_risk_metrics(adjusted_close: pd.DataFrame, benchmark: str = "SPY") -> pd.DataFrame:
 def compute_risk_metrics(adjusted_close: pd.DataFrame, benchmark: str = "SPY") -> pd.DataFrame:
     """Calculate return, CAGR, annualized volatility, max drawdown and beta."""
     if benchmark not in adjusted_close.columns:
