@@ -13,6 +13,7 @@
 - 支持参数网格实验、样本内/样本外指标分离，以及按自然年拆分的策略表现审查。
 - 支持滚动 walk-forward：每个测试窗口只用之前的训练窗口选择参数，并输出连续、互不重叠的样本外收益序列。
 - 通过统一入口按顺序运行数据、组合风险、基准回测、参数验证和滚动验证，并生成汇总研究报告与运行清单。
+- 提供只在本机读取研究产物的 Streamlit 仪表盘，可查看组合风险、策略净值、参数实验、walk-forward 和综合报告，并从侧边栏提交研究任务。
 - 计算 20/60/120 个观测窗口的滚动波动率和回撤，并支持自定义压力情景。
 - 输出相关矩阵及每一对资产的共同观测数量。
 - 输出最大回撤的峰值/谷值/恢复日期，以及每次分析的数据截止时间。
@@ -35,6 +36,8 @@
     ├── strategy_validation.py
     ├── walk_forward_validation.py
     ├── run_research.py
+    ├── dashboard.py
+    ├── requirements-dashboard.txt
     ├── tests/
     │   ├── test_phase1_risk_analysis.py
     │   ├── test_position_scenarios.py
@@ -42,7 +45,8 @@
     │   ├── test_backtest_engine.py
     │   ├── test_strategy_validation.py
     │   ├── test_walk_forward_validation.py
-    │   └── test_run_research.py
+    │   ├── test_run_research.py
+    │   └── test_dashboard.py
     ├── .github/workflows/tests.yml
     ├── data/raw/       # 本地行情缓存；CSV 默认不提交
     └── outputs/        # 运行后生成的表格与图片；默认不提交
@@ -209,6 +213,17 @@ python run_research.py \
 如果需要强制下载行情，可增加 `--refresh`。只有你明确接受旧数据回退风险时，才使用 `--allow-stale-cache`。历史不足以支持 walk-forward 时，可显式加 `--skip-walk-forward`；其余阶段仍会执行，但这次报告将不会包含滚动验证结果。执行中任一必需的子步骤失败，统一入口会停止，不会把不完整流程标记为成功。
 
 研究结果写入 `outputs/`，包括 `research_report.md` 和 `research_run_manifest.json`。请先阅读报告中的数据覆盖、成本口径与局限，再解读收益数字。
+
+## 本地仪表盘
+
+安装可选依赖后，在项目根目录运行：
+
+```bash
+python -m pip install -r requirements-dashboard.txt
+python -m streamlit run dashboard.py
+```
+
+仪表盘从 `outputs/` 读取已有结果；首次使用时可在左侧填写组合权重、样本外日期、成本假设和验证窗口后运行完整研究流程。它默认仅用于本机交互，不执行真实交易，也不会因为打开页面就自动下载行情。请不要将本地服务直接暴露到公网；若需要多人或公网访问，必须先部署身份认证、授权与数据隔离。
 
 ## 滚动 Walk-forward 验证
 
