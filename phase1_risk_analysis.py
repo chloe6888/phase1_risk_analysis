@@ -222,8 +222,14 @@ def get_ticker_data(
     max_cache_age_hours: float = DEFAULT_MAX_CACHE_AGE_HOURS,
 ) -> pd.DataFrame:
     """Use cache only when recent and covering the requested range."""
-    cached = None if refresh else load_cached_ticker(ticker)
+    cached = None
     cache_reason = "refresh requested" if refresh else "no local cache"
+    if not refresh:
+        try:
+            cached = load_cached_ticker(ticker)
+        except Exception as exc:
+            cache_reason = f"cached CSV is invalid: {exc}"
+            print(f"Cache for {ticker} cannot be used: {cache_reason}; refreshing.")
     if cached is not None:
         usable, cache_reason = cache_is_usable(
             ticker, cached, start=start, end=end, max_age_hours=max_cache_age_hours
