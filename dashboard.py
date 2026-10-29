@@ -62,6 +62,9 @@ def output_status(output_dir: str | Path = OUTPUT_DIR) -> dict[str, bool]:
         "holdings_valuation.csv",
         "holdings_latest_price_weights.csv",
         "holdings_risk_alerts.json",
+        "memory_allocation_summary.json",
+        "memory_position_diagnostics.csv",
+        "memory_allocation_scenarios.csv",
         "research_report.md",
     ]
     return {name: (directory / name).is_file() for name in names}
@@ -232,6 +235,9 @@ def main() -> None:
     backtest = read_json(OUTPUT_DIR / "backtest_summary.json")
     validation = read_json(OUTPUT_DIR / "strategy_validation_metadata.json")
     walk = read_json(OUTPUT_DIR / "walk_forward_summary.json")
+    memory = read_json(OUTPUT_DIR / "memory_allocation_summary.json")
+    memory_positions = read_csv(OUTPUT_DIR / "memory_position_diagnostics.csv")
+    memory_decisions = read_csv(OUTPUT_DIR / "memory_allocation_scenarios.csv")
 
     if data_meta:
         st.caption(
@@ -270,8 +276,8 @@ def main() -> None:
             f"有效收益观测：{portfolio.get('observations', 'N/A')}"
         )
 
-    overview_tab, risk_tab, backtest_tab, validation_tab, files_tab = st.tabs(
-        ["总览", "组合风险", "策略回测", "稳健性验证", "结果文件"]
+    overview_tab, risk_tab, backtest_tab, validation_tab, memory_tab, files_tab = st.tabs(
+        ["总览", "组合风险", "策略回测", "稳健性验证", "存储持仓", "结果文件"]
     )
     with overview_tab:
         latest_holdings = read_csv(OUTPUT_DIR / "holdings_valuation.csv")
@@ -396,6 +402,50 @@ def main() -> None:
             st.line_chart(equity_oos)
         if grid is None and folds is None:
             st.info("稳健性验证输出尚不存在。运行研究流程后这里会显示参数网格和 walk-forward 结果。")
+
+    with memory_tab:
+        st.markdown("### MU / SKHY / DRAM 重叠敞口与持仓建议")
+        st.caption("系统依据风险预算和最近可用收盘价生成可解释的调仓方案，不预测股价、不自动下单。")
+        if memory:
+            a, b, c1, d = st.columns(4)
+            a.metric("当前存储主题占比", _pct(float(memory.get("memory_sleeve_weight_pct", 0.0)) / 100.0))
+            b.metric("复核上限", _pct(float(memory.get("max_memory_weight_pct", 0.0)) / 100.0))
+            c1.metric("超限金额估算", f"{memory.get('memory_value_above_limit', 0):,.2f}")
+            d.metric("规则判断", memory.get("overall_action", "N/A"))
+            st.write(memory.get("overall_reason", ""))
+            st.caption(memory.get("denominator_warning", ""))
+            st.caption(
+                f"DRAM 持仓穿透比例假设日期：{memory.get('lookthrough_asof', 'N/A')}；"
+                "ETF 持仓会变动，使用前应更新假设。"
+            )
+            exposures = memory.get("lookthrough_issuer_weights_pct", {})
+            if exposures:
+                st.markdown("#### DRAM 穿透后的单一发行人敞口")
+                st.dataframe(
+                    pd.DataFrame([{"发行人": key, "穿透敞口占比": f"{float(value):.2f}%"} for key, value in exposures.items()]),
+                    hide_index=True, use_container_width=True,
+                )
+        if memory_positions is not None:
+            st.markdown("#### 最新价格、趋势和波动")
+            st.dataframe(memory_positions, use_container_width=True)
+        if memory_decisions is not None:
+            st.markdown("#### 默认平衡方案")
+            balanced = memory_decisions[memory_decisions["scenario"] == "balanced"]
+            if not balanced.empty:
+                st.dataframe(
+                    balanced[["ticker", "current_shares", "latest_close", "target_weight_pct", "target_shares", "share_delta", "action", "reason"]],
+                    hide_index=True, use_container_width=True,
+                )
+            st.markdown("#### 三种持仓结构对比")
+            st.dataframe(
+                memory_decisions[["scenario", "scenario_total_target_weight_pct", "ticker", "target_weight_pct", "target_shares", "share_delta", "action"]],
+                hide_index=True, use_container_width=True,
+            )
+        if memory is None:
+            st.info("请先导入包含 MU、SKHY、DRAM 的持仓 CSV，并运行完整研究流程。")
+        st.warning(
+            "默认权重是可修改的风险预算假设，不是回测优化结果。交易前仍需核对基本面、估值、最新 ETF 持仓以及现金/融资情况。"
+        )
 
     with files_tab:
         st.markdown("### 研究产物状态")
