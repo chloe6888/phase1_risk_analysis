@@ -208,7 +208,7 @@ python strategy_validation.py \
 
 ```bash
 python run_research.py \
-  --weights GOOGL=0.60,SPY=0.40 \
+  --holdings-csv data/private/holdings_snapshot.csv \
   --test-start 2023-01-01 \
   --lookbacks 63,126,252 \
   --skip-recents 5,21 \
@@ -225,7 +225,7 @@ python run_research.py \
 
 ## 导入个人持仓
 
-持仓 CSV 的必需列为 `ticker,shares,average_cost,snapshot_price`；可选列为 `name,risk_group,currency,notes,quantity_source`。股票数量、平均成本和截图参考价应来自自己的券商记录，数据文件放在 `data/private/holdings_snapshot.csv`，该目录已被 `.gitignore` 排除。
+持仓 CSV 的必需列为 `ticker,shares,average_cost,snapshot_price`；可选列为 `name,risk_group,subgroup,currency,notes,quantity_source`。股票数量、平均成本和截图参考价应来自自己的券商记录，数据文件放在 `data/private/holdings_snapshot.csv`，该目录已被 `.gitignore` 排除。
 
 通过一键入口导入后，程序会根据持仓代码下载并检查历史行情，用最近有效的调整收盘价估算市值与组合权重，生成成本/盈亏表和单一仓位集中度提醒。如果同目录存在 `holdings_snapshot.csv.meta.json`，程序还会把行项目合计与券商截图总额对账，明确显示差异，而不是静默消除。
 
