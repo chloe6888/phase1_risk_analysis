@@ -5,10 +5,12 @@
 ## 功能
 
 - 下载 SPY、SOXX、NVDA、GOOGL 日线行情并缓存为 CSV。
-- 检查数据日期、重复行、缺失值和关键价格字段。
+- 检查数据日期、重复行、缺失值、OHLC 合法性和异常大幅日收益。
+- 使用带下载元数据的本地缓存；缓存过期、覆盖范围不完整或缺失元数据时自动刷新。
 - 计算日收益率、复合年化收益率（CAGR）、年化波动率、最大回撤和相对 SPY 的 Beta。
-- 输出日收益相关矩阵。
-- 绘制价格、净值、回撤和相关矩阵图。
+- 输出相关矩阵及每一对资产的共同观测数量。
+- 输出最大回撤的峰值/谷值/恢复日期，以及每次分析的数据截止时间。
+- 绘制个股完整可用区间价格图、共同样本净值图、回撤图和相关矩阵图。
 - 使用离线单元测试验证核心计算，不要求测试时访问行情 API。
 
 行情来自 yfinance 对 Yahoo Finance 数据的访问，适合入门和探索，不应视为经过审计的机构级数据源。
@@ -61,10 +63,13 @@ python -m pip install -r requirements.txt
 python phase1_risk_analysis.py
 ```
 
-脚本默认优先读取本地缓存。首次运行时，缺失的标的会从数据源下载。需要强制更新所有标的时运行：
+脚本会在缓存缺失、缓存超过默认 24 小时、缓存覆盖范围不足或元数据缺失时尝试重新下载。需要强制更新所有标的时运行：
 
 ```bash
 python phase1_risk_analysis.py --refresh
+
+# 仅在有意接受旧数据且刷新失败时，才使用缓存回退
+python phase1_risk_analysis.py --allow-stale-cache
 ```
 
 ## 配置
@@ -88,7 +93,10 @@ python phase1_risk_analysis.py --refresh
 | `outputs/daily_returns.csv` | 调整收盘价计算的日收益率 |
 | `outputs/risk_metrics.csv` | CAGR、年化波动率、最大回撤和 Beta 等指标 |
 | `outputs/correlation_matrix.csv` | 日收益率相关矩阵 |
-| `outputs/closing_prices.png` | 各标的价格序列 |
+| `outputs/correlation_observation_counts.csv` | 每一对资产相关系数使用的共同收益观测数量 |
+| `outputs/max_drawdown_details.csv` | 最大回撤的高点、低点、恢复日期和日历天数 |
+| `outputs/analysis_metadata.json` | 分析时间、参数、数据源及各标的最后数据日期 |
+| `outputs/closing_prices.png` | 每只标的各自完整的有效价格区间 |
 | `outputs/net_value.png` | 共同样本起点归一化为 100 的净值比较 |
 | `outputs/drawdown.png` | 从历史高点计算的回撤曲线 |
 | `outputs/correlation_matrix.png` | 相关矩阵热力图 |
@@ -122,6 +130,26 @@ python position_scenarios.py \
 ```
 
 命令中的价格和持仓数量均为虚构示例，运行前请替换为最新可核验的报价和自己的持仓数据。指定 `--history-csv` 时，CSV 需包含 `Date` 索引以及 `Close` 或 `Adj Close` 列。程序会输出 CSV 至 `outputs/`。
+
+
+### 五批累计计划与风险预算
+
+若要分析连续执行的多批加仓，使用 \`--staged-prices\` 与 \`--staged-shares\`。程序会按批次累计股数、成本均价、现金投入和压力价格下的盈亏。可以用 \`--max-add-cash\` 和 \`--max-total-shares\` 设置硬约束；超过限制时，累计计划会报错而不是继续给出可执行计划。
+
+\`\`\`bash
+python position_scenarios.py \\
+  --ticker GOOGL \\
+  --shares 13 \\
+  --avg-cost 306 \\
+  --price 290 \\
+  --staged-prices 290 280 268 255 240 \\
+  --staged-shares 2 2 2 3 3 \\
+  --stress-prices 267.67 255 240 220 \\
+  --max-add-cash 3200 \\
+  --max-total-shares 25
+\`\`\`
+
+以上数值只是说明命令格式的假设情景，并非当前报价或买入建议。独立的价格/股数对照仍可使用 \`--levels\` 与 \`--add-shares\`，它们的每一行彼此独立，不应误解为按顺序执行的累计计划。
 
 ## 自动化测试
 
