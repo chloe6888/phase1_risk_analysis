@@ -23,7 +23,7 @@ OUT_DIR = ROOT / "outputs"
 
 # Start with the three reference tickers. Add researched tickers only after this
 # first run works; use Yahoo Finance symbols, e.g. "GOOGL" for Alphabet Class A.
-TICKERS = ["SPY", "SOXX", "NVDA"]
+TICKERS = ["SPY", "SOXX", "NVDA", "GOOGL"]
 BENCHMARK = "SPY"
 START_DATE = "2015-01-01"
 
