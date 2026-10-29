@@ -255,7 +255,7 @@ def main() -> None:
     parser.add_argument("--staged-shares", type=int, nargs="+", help="Share counts for each sequential tranche; use 0 to skip a tranche")
     parser.add_argument("--max-add-cash", type=float, help="Maximum total additional cash budget in USD")
     parser.add_argument("--max-total-shares", type=float, help="Maximum allowed total share count after adding")
-    parser.add_argument("--max-stress-loss-pct", type=float, help="Maximum permitted loss fraction at each stress price (0.10 = 10%%)")
+    parser.add_argument("--max-stress-loss-pct", type=float, help="Maximum permitted loss fraction at each stress price (0.10 = 10%)")
     parser.add_argument("--stress-prices", type=float, nargs="*", default=[], help="Downside prices for stress-testing")
     parser.add_argument("--history-csv", type=Path, default=None, help="Optional daily CSV with Date plus Close or Adj Close")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
