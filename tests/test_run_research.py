@@ -104,7 +104,8 @@ def test_report_shows_imported_holdings_reconciliation_and_alerts() -> None:
             "largest_risk_group_weight_pct": 100.0,
         },
         holdings_alerts=[{
-            "level": "warning", "message": "Risk theme 'semiconductor_related' weighs 100.0%.",
+            "level": "warning", "kind": "risk_group_concentration", "name": "semiconductor_related",
+            "weight_pct": 100.0, "threshold_pct": 45.0, "message": "Risk theme 'semiconductor_related' weighs 100.0%.",
         }],
         holdings_reconciliation={
             "market_value_delta": 1.5,
@@ -116,6 +117,7 @@ def test_report_shows_imported_holdings_reconciliation_and_alerts() -> None:
     assert "持仓快照核对" in report
     assert "核对持股数量" in report
     assert "semiconductor_related" in report
+    assert "风险主题“semiconductor_related”占导入股票/ETF持仓 100.0%" in report
     assert "现金、债券" in report
 
 
@@ -150,4 +152,4 @@ def test_report_renders_memory_allocation_rule_and_balanced_share_targets() -> N
     assert "存储主题仓位超限" in report
     assert "SKHY" in report
     assert "目标股数" in report
-    assert "Imported listed positions only" in report
+    assert "当前占比仅按导入的股票和 ETF 持仓计算" in report
