@@ -115,6 +115,9 @@ def validate_assumptions(config: Mapping[str, Any]) -> dict[str, Any]:
         "overvaluation_premium": premium,
         "forecast_years": years_raw,
         "cyclical": bool(config.get("cyclical", False)),
+        "per_share_basis_verified": bool(config.get("per_share_basis_verified", True)),
+        "per_share_basis_note": str(config.get("per_share_basis_note", "")),
+        "adr_underlying_shares_per_ads": finite_number(config.get("adr_underlying_shares_per_ads")),
         "normalized_fcf": finite_number(config.get("normalized_fcf")),
         "normalized_fcf_currency": str(config.get("normalized_fcf_currency", "")).upper() or None,
         "notes": str(config.get("notes", "")),
@@ -220,6 +223,9 @@ def value_ticker(
         "margin_of_safety": cfg["margin_of_safety"],
         "overvaluation_premium": cfg["overvaluation_premium"],
         "cyclical": cfg["cyclical"],
+        "per_share_basis_verified": cfg["per_share_basis_verified"],
+        "per_share_basis_note": cfg["per_share_basis_note"],
+        "adr_underlying_shares_per_ads": cfg["adr_underlying_shares_per_ads"],
         "assumption_source": cfg["assumption_source"],
         "assumption_notes": cfg["notes"],
         "data_quality": fundamentals.get("data_quality", "unverified_vendor_snapshot"),
@@ -240,7 +246,7 @@ def value_ticker(
     }
 
     dcf_results: dict[str, float] = {}
-    if not dcf_currency_mismatch and valuation_fcf is not None and valuation_fcf > 0 and shares is not None and shares > 0:
+    if cfg["per_share_basis_verified"] and not dcf_currency_mismatch and valuation_fcf is not None and valuation_fcf > 0 and shares is not None and shares > 0:
         for scenario, config in cfg["scenarios"].items():
             try:
                 result = dcf_valuation(
@@ -263,7 +269,7 @@ def value_ticker(
                 row["dcf_view"] = _price_view(price, row["dcf_buy_below"], row["dcf_sell_review_above"])
 
     pe_results: dict[str, float] = {}
-    if not pe_currency_mismatch and forward_eps is not None and forward_eps > 0:
+    if cfg["per_share_basis_verified"] and not pe_currency_mismatch and forward_eps is not None and forward_eps > 0:
         for scenario, config in cfg["scenarios"].items():
             try:
                 result = pe_valuation(forward_eps=forward_eps, fair_pe=config["fair_pe"])
@@ -280,6 +286,11 @@ def value_ticker(
 
     confidence = "medium"
     limitations: list[str] = []
+    if not cfg["per_share_basis_verified"]:
+        limitations.append(
+            "每股估值口径尚未核验：" + (cfg["per_share_basis_note"] or "数据源的 EPS/股数是否按当前上市证券单位披露尚未确认。") + "；DCF/PE 均已暂停。"
+        )
+        confidence = "low"
     if dcf_currency_mismatch:
         limitations.append(
             f"报价币种 {fundamentals.get('currency')} 与自由现金流报告币种 {fundamentals.get('financial_currency')} 不一致，未进行汇率换算；DCF 已暂停。"
