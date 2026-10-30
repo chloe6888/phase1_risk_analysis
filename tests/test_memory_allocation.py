@@ -48,8 +48,8 @@ def test_calculate_memory_allocation_flags_concentration_and_overlap() -> None:
     assert summary["imported_listed_positions_market_value"] == pytest.approx(5500)
     assert summary["memory_sleeve_weight_pct"] == pytest.approx(3000/5500*100)
     assert summary["overall_action"] == "REDUCE_MEMORY_SLEEVE"
-    assert summary["lookthrough_exposure_values"]["MU"] == pytest.approx(1000 + 1000*0.2825)
-    assert summary["lookthrough_exposure_values"]["SKHY"] == pytest.approx(1000 + 1000*0.2132)
+    assert summary["lookthrough_exposure_values"]["MU"] == pytest.approx(1000 + 1000*0.2787)
+    assert summary["lookthrough_exposure_values"]["SKHY"] == pytest.approx(1000 + 1000*0.2114)
     assert len(summary["issuer_alerts"]) == 2
     assert set(positions.index) == {"MU", "SKHY", "DRAM"}
     assert {"balanced", "etf_core", "direct_only"}.issubset(set(decisions["scenario"]))
@@ -161,5 +161,5 @@ def test_cap_only_scenario_preserves_dram_and_minimizes_direct_stock_trim() -> N
 
 def test_latest_dram_lookthrough_defaults_are_dated() -> None:
     assert app.DEFAULT_LOOKTHROUGH_ASOF == "2026-10-29"
-    assert app.DEFAULT_DRAM_LOOKTHROUGH["MU"] == pytest.approx(0.2666)
-    assert app.DEFAULT_DRAM_LOOKTHROUGH["SKHY"] == pytest.approx(0.1659)
+    assert app.DEFAULT_DRAM_LOOKTHROUGH["MU"] == pytest.approx(0.2787)
+    assert app.DEFAULT_DRAM_LOOKTHROUGH["SKHY"] == pytest.approx(0.2114)
