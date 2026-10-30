@@ -74,6 +74,14 @@ def test_streamlit_dashboard_initializes_without_existing_outputs() -> None:
     assert not page.exception
     assert page.title
     assert page.title[0].value == "个人投资研究工作台"
+    assert any(
+        "策略可靠性：滚动样本外验证" in element.value
+        for element in page.markdown
+    )
+    assert any(
+        "尚无滚动样本外验证结果" in element.value
+        for element in page.info
+    )
 
 
 def test_make_pipeline_command_uses_imported_holdings_instead_of_manual_weights() -> None:
