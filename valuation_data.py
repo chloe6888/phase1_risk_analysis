@@ -136,6 +136,10 @@ def fetch_yahoo_snapshot(ticker: str, ticker_factory: Callable[[str], Any] | Non
         except Exception as exc:
             errors.append(f"fast_info: {type(exc).__name__}: {exc}")
 
+    if price is None:
+        price = _number(info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose"))
+        if price is not None:
+            price_date = _date_from_epoch(info.get("regularMarketTime"))
     currency = str(info.get("currency") or info.get("financialCurrency") or "USD").upper()
     shares = _number(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"))
     cash = _number(info.get("totalCash"))
