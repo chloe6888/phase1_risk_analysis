@@ -550,6 +550,19 @@ def main() -> None:
             shown = [name for name in preferred if name in valuation_summary.columns]
             st.dataframe(valuation_summary[shown], hide_index=True, use_container_width=True)
             st.caption("价格单位沿用各证券交易币种；买入观察线与卖出复核线来自基准情景和安全边际/溢价假设，不是交易指令。")
+            financial_columns = [
+                "ticker", "revenue", "gross_profit", "operating_income", "net_income", "ebitda",
+                "revenue_growth_yoy", "gross_margin", "operating_margin", "net_margin",
+                "return_on_equity", "return_on_assets", "trailing_pe", "forward_pe",
+            ]
+            available_financial_columns = [name for name in financial_columns if name in valuation_summary.columns]
+            if available_financial_columns:
+                st.markdown("#### 经营与盈利质量")
+                st.dataframe(
+                    valuation_summary[available_financial_columns],
+                    hide_index=True,
+                    use_container_width=True,
+                )
 
             selected_report = st.selectbox(
                 "查看单只股票研究说明",
