@@ -344,3 +344,28 @@ def test_yahoo_adapter_preserves_quote_and_financial_currencies() -> None:
     assert result["dcf_currency_mismatch"] is True
     assert result["eps_currency"] == "USD"
     assert result["pe_currency_mismatch"] is False
+
+
+def test_quote_currency_normalized_fcf_can_enable_adr_dcf() -> None:
+    assumptions = json.loads(json.dumps(BASE_ASSUMPTIONS))
+    assumptions["cyclical"] = True
+    assumptions["normalized_fcf"] = 250.0
+    assumptions["normalized_fcf_currency"] = "USD"
+    fundamentals = {
+        "current_price": 160,
+        "currency": "USD",
+        "financial_currency": "KRW",
+        "currency_mismatch": True,
+        "dcf_currency_mismatch": True,
+        "pe_currency_mismatch": False,
+        "forward_eps": 15.0,
+        "free_cash_flow": 100,
+        "diluted_shares": 10,
+        "cash": 100,
+        "debt": 0,
+    }
+    result = value_ticker("SKHY", fundamentals, assumptions)
+    assert result["dcf_base"] is not None
+    assert result["valuation_fcf"] == 250.0
+    assert result["valuation_fcf_currency"] == "USD"
+    assert result["fcf_basis"] == "user_normalized_fcf"
