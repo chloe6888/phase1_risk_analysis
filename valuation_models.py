@@ -172,6 +172,8 @@ def value_ticker(
         "current_price": price,
         "price_date": fundamentals.get("price_date"),
         "data_fetched_at_utc": fundamentals.get("fetched_at_utc"),
+        "cache_age_hours": finite_number(fundamentals.get("cache_age_hours")),
+        "stale_data": bool(fundamentals.get("stale_data", False)),
         "financial_period": fundamentals.get("financial_period"),
         "data_source": fundamentals.get("data_source", "Yahoo Finance via yfinance"),
         "forward_eps": forward_eps,
