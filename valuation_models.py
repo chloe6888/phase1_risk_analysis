@@ -40,7 +40,7 @@ def dcf_valuation(
     terminal_growth: float,
     forecast_years: int = 5,
 ) -> dict[str, float]:
-    """Return FCFF-based enterprise/equity value and per-share intrinsic value.
+    """Return indicative equity value and per-share value from the FCF proxy.
 
     The cash-flow input is treated as an equity-cash-flow proxy. Yahoo's reported
     CFO-less-CapEx FCF is not fully reconciled FCFE; discount at cost of equity and
@@ -48,7 +48,7 @@ def dcf_valuation(
     """
     fcf0 = _required_positive(free_cash_flow, "free_cash_flow")
     shares = _required_positive(diluted_shares, "diluted_shares")
-     growth = finite_number(annual_growth)
+    growth = finite_number(annual_growth)
     cost = finite_number(cost_of_equity)
     terminal = finite_number(terminal_growth)
     if growth is None or not -0.75 <= growth <= 1.0:
