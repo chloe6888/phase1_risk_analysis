@@ -112,7 +112,7 @@ def render_report(
                 f"- 估算市值与券商汇总差额： {fmt_num(holdings_reconciliation.get('market_value_delta'), 2)}",
                 f"- 浮动盈亏估算与券商汇总差额： {fmt_num(holdings_reconciliation.get('unrealized_pnl_delta'), 2)}",
                 f"- 券商截图记录的当日盈亏： {fmt_num(holdings_reconciliation.get('reported_today_pnl'), 2)}",
-                f"- 是否在设定误差范围内对齐： {'Yes' if holdings_reconciliation.get('within_tolerance') else 'No — verify shares, price timestamps, hidden positions, and fees'}", "",
+                f"- 是否在设定误差范围内对齐： {'是' if holdings_reconciliation.get('within_tolerance') else '否——请核对持股数量、报价时间、遗漏持仓和费用'}", "",
             ])
         if holdings_alerts:
             lines.extend(["### 集中度风险提醒", ""])
@@ -126,6 +126,11 @@ def render_report(
             "最近收盘价仅用于历史估值参考，不代表实时可成交报价。采取行动前，请核实每个标的的持股数量和报价日期。", "",
         ])
     if memory_summary:
+        denominator_warning = str(memory_summary.get("denominator_warning", "") or "")
+        if denominator_warning.startswith("Percentages are relative to the full net portfolio equity"):
+            denominator_warning = "本页占比以所提供的账户总净资产为分母；请确认该金额已包含现金、其他资产及负债。"
+        elif denominator_warning.startswith("Cash, bonds, other accounts and financing are not included"):
+            denominator_warning = "当前占比仅按导入的股票和 ETF 持仓计算，尚未包含现金、债券、其他账户及融资负债。"
         lines += [
             "## MU / SKHY / DRAM 存储主题分析", "",
             f"- 当前存储主题占比： {fmt_pct(float(memory_summary.get('memory_sleeve_weight_pct', 0.0)) / 100.0)}",
@@ -157,16 +162,16 @@ def render_report(
                     )
                 lines.append("")
         lines += [
-            memory_summary.get("denominator_warning", ""),
+            denominator_warning,
             "近期价格动量和波动率仅是描述性筛选，不会覆盖已触发的仓位上限，也不能替代基本面估值。",
             "",
         ]
     if portfolio:
         lines += [
             "## 组合风险分析", "",
-            f"- 统计区间： {portfolio.get('start_date', 'N/A')} to {portfolio.get('end_date', 'N/A')}",
+            f"- 统计区间： {portfolio.get('start_date', 'N/A')} 至 {portfolio.get('end_date', 'N/A')}",
             f"- 有效收益观测： {portfolio.get('observations', 'N/A')}",
-            f"- 无风险收益率来源： {portfolio.get('risk_free_rate_source', 'constant annual rate')}", "",
+            f"- 无风险收益率来源： { {'constant annual rate': '固定年化无风险收益率', 'dated annualized yield series': '按日期变化的年化收益率序列'}.get(str(portfolio.get('risk_free_rate_source', 'constant annual rate')), portfolio.get('risk_free_rate_source', '暂无记录'))}", "",
             "| 指标 | 数值 |", "|---|---:|", *metrics_table(portfolio),
             f"| 历史单期 VaR | {fmt_pct(portfolio.get('historical_var_one_period'))} |",
             f"| 历史单期 CVaR | {fmt_pct(portfolio.get('historical_cvar_one_period'))} |", "",
@@ -177,15 +182,15 @@ def render_report(
         strategy, base = backtest.get("strategy", {}), backtest.get("benchmark", {})
         lines += [
             "## 基准动量策略历史回测（仅供参考）", "",
-            f"- 统计区间： {backtest.get('start_date', 'N/A')} to {backtest.get('end_date', 'N/A')}",
+            f"- 统计区间： {backtest.get('start_date', 'N/A')} 至 {backtest.get('end_date', 'N/A')}",
             f"- 有效收益观测： {backtest.get('observations', 'N/A')}",
             f"- 成本假设： {backtest.get('transaction_cost_bps', 'N/A')} 个基点交易成本，滑点 {backtest.get('slippage_bps', 'N/A')} 个基点（按成交金额估算）", "",
             "| 指标 | 策略 | 对比基准 |", "|---|---:|---:|",
         ]
         for key, label, percentage in [
-            ("total_return", "Total return", True), ("annualized_return", "Annualized return", True),
-            ("annualized_volatility", "Annualized volatility", True), ("sharpe_ratio", "Sharpe ratio", False),
-            ("sortino_ratio", "Sortino ratio", False), ("max_drawdown", "Max drawdown", True),
+            ("total_return", "累计收益率", True), ("annualized_return", "年化收益率", True),
+            ("annualized_volatility", "年化波动率", True), ("sharpe_ratio", "夏普比率", False),
+            ("sortino_ratio", "索提诺比率", False), ("max_drawdown", "最大回撤", True),
         ]:
             left = fmt_pct(strategy.get(key)) if percentage else fmt_num(strategy.get(key))
             right = fmt_pct(base.get(key)) if percentage else fmt_num(base.get(key))
@@ -233,9 +238,9 @@ def render_report(
             base = walk_forward["out_of_sample_benchmark"]
             lines += ["| 指标 | 滚动样本外策略 | 对比基准 |", "|---|---:|---:|"]
             for key, label, percentage in [
-                ("total_return", "Total return", True), ("annualized_return", "Annualized return", True),
-                ("annualized_volatility", "Annualized volatility", True), ("sharpe_ratio", "Sharpe ratio", False),
-                ("max_drawdown", "Max drawdown", True),
+                ("total_return", "累计收益率", True), ("annualized_return", "年化收益率", True),
+                ("annualized_volatility", "年化波动率", True), ("sharpe_ratio", "夏普比率", False),
+                ("max_drawdown", "最大回撤", True),
             ]:
                 left = fmt_pct(strategy.get(key)) if percentage else fmt_num(strategy.get(key))
                 right = fmt_pct(base.get(key)) if percentage else fmt_num(base.get(key))
