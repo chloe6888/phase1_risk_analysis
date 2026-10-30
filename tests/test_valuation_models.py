@@ -185,3 +185,75 @@ def test_get_snapshot_requires_explicit_stale_cache_fallback(tmp_path: Path) -> 
     )
     assert result["stale_data"] is True
     assert result["current_price"] == 10
+
+def test_repository_starter_assumptions_validate_for_watchlist() -> None:
+    from pathlib import Path
+
+    from run_valuation import load_config, ticker_assumptions
+
+    config_path = Path(__file__).resolve().parents[1] / "config" / "valuation_assumptions.json"
+    config = load_config(config_path)
+    assert {"GOOG", "NVDA", "MU", "SKHY"}.issubset(config["tickers"])
+    for symbol in ("GOOG", "NVDA", "MU", "SKHY"):
+        validate_assumptions(ticker_assumptions(config, symbol))
+
+
+def test_run_valuation_writes_report_and_manifest_without_network(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import run_valuation
+
+    config = {
+        "default_settings": {
+            "margin_of_safety": 0.25,
+            "overvaluation_premium": 0.20,
+            "forecast_years": 5,
+        },
+        "tickers": {"TEST": BASE_ASSUMPTIONS},
+    }
+    config_path = tmp_path / "assumptions.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    monkeypatch.setattr(
+        run_valuation,
+        "get_snapshot",
+        lambda _ticker, **_kwargs: {
+            "ticker": "TEST",
+            "company_name": "Example",
+            "currency": "USD",
+            "current_price": 100,
+            "price_date": "2026-10-29",
+            "fetched_at_utc": "2026-10-30T00:00:00+00:00",
+            "financial_period": "2026-09-30",
+            "forward_eps": 5,
+            "eps_source": "test",
+            "free_cash_flow": 1_000_000,
+            "fcf_source": "test",
+            "diluted_shares": 1_000_000,
+            "cash": 100,
+            "debt": 50,
+            "market_cap": 100_000_000,
+            "data_quality": "test",
+            "stale_data": False,
+            "fetch_warnings": [],
+        },
+    )
+
+    rows = run_valuation.run(
+        ["TEST"],
+        config_path=config_path,
+        cache_dir=tmp_path / "cache",
+        output_dir=tmp_path / "outputs",
+    )
+
+    assert rows[0]["ticker"] == "TEST"
+    for name in (
+        "valuation_summary.csv",
+        "valuation_fundamentals.json",
+        "valuation_assumptions_used.json",
+        "valuation_report.md",
+        "valuation_run_manifest.json",
+    ):
+        assert (tmp_path / "outputs" / name).is_file()
+    assert "基准情景估值" in (tmp_path / "outputs" / "valuation_report.md").read_text(encoding="utf-8") or "买入观察线" in (
+        tmp_path / "outputs" / "valuation_report.md"
+    )
