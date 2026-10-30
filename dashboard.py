@@ -68,6 +68,9 @@ def output_status(output_dir: str | Path | None = None) -> dict[str, bool]:
         "memory_position_diagnostics.csv",
         "memory_allocation_scenarios.csv",
         "research_report.md",
+        "valuation_summary.csv",
+        "valuation_report.md",
+        "valuation_run_manifest.json",
     ]
     return {name: (directory / name).is_file() for name in names}
 
