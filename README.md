@@ -42,6 +42,8 @@
     ├── strategy_validation.py
     ├── strategy_research.py
     ├── portfolio_optimizer.py
+    ├── paper_trading.py
+    ├── risk_monitor.py
     ├── walk_forward_validation.py
     ├── run_research.py
     ├── dashboard.py
@@ -58,6 +60,8 @@
     │   ├── test_strategy_validation.py
     │   ├── test_strategy_research.py
     │   ├── test_portfolio_optimizer.py
+    │   ├── test_paper_trading.py
+    │   ├── test_risk_monitor.py
     │   ├── test_walk_forward_validation.py
     │   ├── test_run_research.py
     │   ├── test_dashboard.py
@@ -322,6 +326,43 @@ python portfolio_optimizer.py \
 输出包括 `portfolio_optimized_weights.csv`、`portfolio_optimization_summary.json` 和 `portfolio_optimization_report.md`。报告同时比较约束下的优化组合与约束下等权组合，并输出资产风险贡献。
 
 **使用边界：** 该优化器只依据历史协方差（均值—方差模式还会使用历史平均收益）求解，不预测未来收益。历史最小方差不保证未来风险更低；分组必须互斥，每只资产只能属于一个组。当前不考虑交易成本、税费、流动性、最小交易单位和真实订单执行，也不会下单。
+
+## 纸面交易模拟
+
+新增 `paper_trading.py`，将优化器或人工编制的目标权重转换为离线模拟订单。目标 CSV 必须包含 `ticker,weight`；初始持仓 CSV 必须包含 `ticker,shares`。默认使用 `data/raw/close_price_panel.csv` 的最近可用收盘价，卖出先于买入，模拟成交价按配置滑点向不利方向调整，手续费按成交金额计算；现金不足时按比例缩减买单，整数股模式向下取整。
+
+仅预览订单：
+
+```bash
+python paper_trading.py \
+  --targets-csv outputs/portfolio_optimized_weights.csv \
+  --holdings-csv data/private/holdings_snapshot.csv \
+  --cash 5000 \
+  --prices data/raw/close_price_panel.csv
+```
+
+默认不修改任何持仓账本。只有明确加入 `--commit-ledger` 时，才将模拟后的现金和股数写入本地 JSON 账本；后续运行会从账本读取模拟账户。输出包括 `paper_trade_orders.csv`、`paper_trading_holdings_after.csv` 和 `paper_trading_summary.json`。
+
+**边界：** 这不是券商接口，不会发送订单。模拟采用参考收盘价加不利滑点，不模拟盘中成交、排队、市场冲击、税费、停牌或涨跌幅限制；纸面账本也不代表券商真实持仓。
+
+## 组合风险监控
+
+新增 `risk_monitor.py`，按当前持仓计算个股权重和主题/分组敞口，并检查单股上限、分组上限、历史年化波动率、历史最大回撤、单期 95% VaR/CVaR、历史不足和价格数据过期。
+
+```bash
+python risk_monitor.py \
+  --holdings-csv data/private/holdings_snapshot.csv \
+  --prices data/raw/close_price_panel.csv \
+  --adjusted-prices data/raw/adjusted_close_panel.csv \
+  --cash 5000 \
+  --single-name-limit 0.15 \
+  --volatility-limit 0.40 \
+  --drawdown-limit 0.25
+```
+
+持仓 CSV 可增加 `risk_group` 列；也可以通过 `--groups-json` 与 `--group-caps-json` 覆盖分组和上限。输出包括 `risk_monitor_positions.csv`、`risk_monitor_alerts.csv`、`risk_monitor_daily_path.csv`、`risk_monitor_snapshot.json` 和 `risk_monitor_report.md`。
+
+**历史口径限制：** 历史风险路径将当前股数应用于过去的调整收盘价，并假设现金余额不变；它不是按历史交易、入金、出金及公司行动重建的真实账户净值。因此历史波动率、回撤和 VaR/CVaR 是风险代理估计，而不是实际账户历史业绩或损失上限。阈值是用户配置的风险预算规则，监控只产生告警，不自动交易。
 
 ## 一键运行完整研究流程
 
