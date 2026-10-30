@@ -360,6 +360,8 @@ def _localized_report(markdown: str) -> str:
 
 
 def _task_step_label(step: str) -> str:
+    if "Fetch data and value" in step:
+        return step.replace("Fetch data and value", "获取行情与财务数据并计算估值", 1)
     labels = {
         "1/5 Data download, cache, and validation": "第 1 步：行情下载与数据质量检查",
         "2/5 Portfolio risk and stress cases": "第 2 步：组合风险与压力测试",
@@ -548,6 +550,9 @@ def _build_decision_review(
         values = values.merge(held, on="股票代码", how="outer")
     else:
         values["持股数量"] = pd.NA
+    for column in ("DCF 区间判断", "PE 区间判断", "估值可信度", "数据完整度"):
+        if column in values.columns:
+            values[column] = values[column].replace(VALUATION_VALUE_LABELS)
     if "持股数量" in values.columns:
         values["持仓状态"] = values["持股数量"].notna().map({True: "当前持仓", False: "观察标的"})
     ordered = [
