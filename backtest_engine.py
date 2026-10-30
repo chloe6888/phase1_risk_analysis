@@ -86,7 +86,8 @@ def _metric_summary(
         if daily_rf.isna().any() or not np.isfinite(daily_rf.to_numpy(dtype=float)).all():
             raise ValueError("Risk-free daily returns must cover every strategy return date with finite values.")
     excess = values - daily_rf
-    sharpe = float(excess.mean() / daily_vol * math.sqrt(periods_per_year)) if daily_vol > 0 else None
+    excess_vol = float(excess.std(ddof=1)) if len(excess) >= 2 else 0.0
+    sharpe = float(excess.mean() / excess_vol * math.sqrt(periods_per_year)) if excess_vol > 0 else None
     downside = float(np.sqrt(np.square(np.minimum(excess, 0.0)).mean()))
     sortino = float(excess.mean() / downside * math.sqrt(periods_per_year)) if downside > 0 else None
     drawdown = max_drawdown_series(values)
@@ -150,11 +151,15 @@ def _daily_risk_free_returns(
     if yields.isna().any() or not np.isfinite(yields.to_numpy(dtype=float)).all() or (yields <= -1).any():
         raise ValueError("Risk-free annualized yields must be finite decimals greater than -1.")
     aligned = yields.reindex(dates).ffill()
-    # The first price row has no return; backfill only that leading, unused rate.
-    aligned = aligned.bfill()
-    if aligned.isna().any():
-        first_missing = aligned.index[aligned.isna()][0].date().isoformat()
-        raise ValueError(f"Risk-free yield series does not cover the backtest; first missing date is {first_missing}.")
+    # Only the first price row has no return. Every later return date must be
+    # covered by the supplied series; never backfill actual return dates forward.
+    if len(aligned) > 1 and aligned.iloc[1:].isna().any():
+        first_missing = aligned.iloc[1:][aligned.iloc[1:].isna()].index[0].date().isoformat()
+        raise ValueError(f"Risk-free yield series does not cover the backtest; first missing return date is {first_missing}.")
+    if len(aligned) and pd.isna(aligned.iloc[0]):
+        if len(aligned) < 2:
+            raise ValueError("Risk-free yield series has no observation covering a return date.")
+        aligned.iloc[0] = aligned.iloc[1]
     daily = np.power(1.0 + aligned, 1.0 / periods_per_year) - 1.0
     return pd.Series(daily.to_numpy(dtype=float), index=dates, name="risk_free_return")
 
