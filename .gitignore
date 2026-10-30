@@ -16,6 +16,7 @@ data/private/*
 !data/private/.gitkeep
 
 # Downloaded market data and generated analysis outputs (keep directory placeholders)
+data/fundamentals/*.json
 data/raw/*.csv
 data/raw/*.meta.json
 outputs/*
