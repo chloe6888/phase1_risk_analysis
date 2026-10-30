@@ -96,7 +96,7 @@ def _portfolio_returns_from_panel(
     # convert missing prices into zero returns or renormalize portfolio weights.
     common_returns = asset_returns.dropna(how="any")
     if len(common_returns) < 2:
-        raise ValueError("At least three common adjusted-close observations are required to estimate risk.")
+        raise ValueError("At least two common return observations (three adjusted-close price observations) are required to estimate risk.")
     portfolio_returns = common_returns.dot(active_weights.reindex(common_returns.columns))
     portfolio_returns.name = "portfolio_return"
     return portfolio_returns, common_returns, active_weights
