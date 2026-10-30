@@ -114,7 +114,7 @@ def run_walk_forward(
         fold_number += 1
         train_dates = common_index[test_start_pos - train_window:test_start_pos]
         test_dates = common_index[test_start_pos:test_start_pos + test_window]
-        scores: list[tuple[float, tuple[int, int, int], dict[str, object]]] = []
+        scores: list[tuple[float, tuple[int, int, int, str], dict[str, object]]] = []
         for key in combos:
             if key not in returns:
                 continue
