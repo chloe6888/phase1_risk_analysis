@@ -289,7 +289,7 @@ def _number(value: Any, digits: int = 2) -> str:
 def _short_history_warning(observations: Any) -> str | None:
     """Explain when annualized risk metrics rely on fewer than one trading year."""
     count_value = _float_or_none(observations)
-    if count_value is None:
+    if count_value is None or not math.isfinite(count_value):
         return None
     count = int(count_value)
     if count >= MIN_RISK_HISTORY_OBSERVATIONS:
