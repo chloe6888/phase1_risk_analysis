@@ -103,6 +103,16 @@ def fmt_number(value: Any) -> str:
     return f"{number:,.2f}"
 
 
+def fmt_percent(value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+    if pd.isna(number):
+        return "N/A"
+    return f"{number:.2%}"
+
+
 def render_report(rows: list[dict[str, Any]], generated_at: str, symbols: list[str]) -> str:
     lines = [
         "# 个股估值研究报告",
@@ -146,8 +156,8 @@ def render_report(rows: list[dict[str, Any]], generated_at: str, symbols: list[s
             f"- 现金 / 债务：{fmt_money(row.get('cash'), currency)} / {fmt_money(row.get('debt'), currency)}",
             f"- 营收 / 毛利：{fmt_money(row.get('revenue'), currency)} / {fmt_money(row.get('gross_profit'), currency)}",
             f"- 营业利润 / 净利润 / EBITDA：{fmt_money(row.get('operating_income'), currency)} / {fmt_money(row.get('net_income'), currency)} / {fmt_money(row.get('ebitda'), currency)}",
-            f"- 营收同比：{fmt_number(row.get('revenue_growth_yoy'))}；毛利率：{fmt_number(row.get('gross_margin'))}；营业利润率：{fmt_number(row.get('operating_margin'))}；净利率：{fmt_number(row.get('net_margin'))}",
-            f"- ROE / ROA：{fmt_number(row.get('return_on_equity'))} / {fmt_number(row.get('return_on_assets'))}",
+            f"- 营收同比：{fmt_percent(row.get('revenue_growth_yoy'))}；毛利率：{fmt_percent(row.get('gross_margin'))}；营业利润率：{fmt_percent(row.get('operating_margin'))}；净利率：{fmt_percent(row.get('net_margin'))}",
+            f"- ROE / ROA：{fmt_percent(row.get('return_on_equity'))} / {fmt_percent(row.get('return_on_assets'))}",
             f"- Trailing PE / Forward PE（数据源）：{fmt_number(row.get('trailing_pe'))} / {fmt_number(row.get('forward_pe'))}",
             f"- 财务指标来源：{row.get('financial_metric_sources') or '缺失'}",
             f"- 财务报表期间：{row.get('financial_period') or '未提供'}",
