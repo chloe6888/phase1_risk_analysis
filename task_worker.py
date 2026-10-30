@@ -95,8 +95,15 @@ def main() -> int:
             return_code = process.wait()
             log.write(f"\n[{utc_now()}] EXIT code={return_code}\n")
 
-        report = artifacts_dir / "research_report.md"
-        manifest = artifacts_dir / "research_run_manifest.json"
+        task_type = str(status.get("task_type", "research"))
+        if task_type == "valuation":
+            report = artifacts_dir / "valuation_report.md"
+            manifest = artifacts_dir / "valuation_run_manifest.json"
+            task_label = "个股估值"
+        else:
+            report = artifacts_dir / "research_report.md"
+            manifest = artifacts_dir / "research_run_manifest.json"
+            task_label = "完整研究"
         if return_code == 0 and report.is_file() and manifest.is_file():
             publish_success(task_id, task_dir, ROOT)
             update_status(
@@ -104,16 +111,16 @@ def main() -> int:
                 state="succeeded",
                 finished_at=utc_now(),
                 exit_code=0,
-                current_step="研究完成",
-                message="完整研究报告已发布；仪表盘可加载最新成功结果。",
+                current_step=f"{task_label}完成",
+                message=f"{task_label}报告已发布；仪表盘可加载最新成功结果。",
                 report_path=str(report.relative_to(ROOT)),
             )
             return 0
 
         message = (
-            f"研究命令退出码为 {return_code}。"
+            f"{task_label}命令退出码为 {return_code}。"
             if return_code != 0
-            else "流程退出码为 0，但缺少完整报告或运行清单，结果未发布。"
+            else f"{task_label}流程退出码为 0，但缺少完整报告或运行清单，结果未发布。"
         )
         update_status(
             status_path, status,
