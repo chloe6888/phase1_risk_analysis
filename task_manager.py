@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import time
 import uuid
 from datetime import datetime, timezone
@@ -87,6 +86,13 @@ def get_current_task(repository_root: Path = ROOT) -> dict[str, object] | None:
         return None
     state = str(status.get("state", "unknown"))
     pid = status.get("pid")
+    if not isinstance(pid, int):
+        pid_file = status_path.parent / "worker.pid"
+        try:
+            pid = int(pid_file.read_text(encoding="ascii").strip())
+            status["pid"] = pid
+        except (OSError, ValueError):
+            pid = None
     if state in ACTIVE_STATES and isinstance(pid, int) and not pid_is_alive(pid):
         status.update({
             "state": "failed",
@@ -101,12 +107,12 @@ def get_current_task(repository_root: Path = ROOT) -> dict[str, object] | None:
 def get_task_log(task_id: str, repository_root: Path = ROOT, max_chars: int = 12000) -> str:
     path = task_directory(task_id, repository_root) / "worker.log"
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
+        with path.open("rb") as handle:
             handle.seek(0, os.SEEK_END)
             size = handle.tell()
             handle.seek(max(0, size - max_chars * 4), os.SEEK_SET)
             content = handle.read()
-        return content[-max_chars:]
+        return content.decode("utf-8", errors="replace")[-max_chars:]
     except OSError:
         return "暂无运行日志。"
 
@@ -219,11 +225,9 @@ def start_task(command: Sequence[str], repository_root: Path = ROOT) -> dict[str
                 start_new_session=True,
                 close_fds=True,
             )
+        (task_dir / "worker.pid").write_text(str(process.pid), encoding="ascii")
         latest_status = read_json(status_path) or status
         latest_status["pid"] = int(process.pid)
-        if latest_status.get("state") == "queued":
-            latest_status["message"] = "后台研究进程已启动。"
-        atomic_write_json(status_path, latest_status)
         return latest_status
     except Exception:
         raise
