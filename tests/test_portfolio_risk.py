@@ -212,3 +212,21 @@ def test_cli_does_not_fail_when_default_rolling_windows_exceed_short_history(tmp
     assert "Only 6 common-return observations" in summary["rolling_risk_note"]
     assert (output_dir / "portfolio_rolling_risk.csv").exists()
     assert "insufficient common-return history" in result.stdout.lower()
+
+
+def test_calculate_portfolio_risk_uses_dated_annualized_risk_free_yield() -> None:
+    prices = sample_prices()
+    yields = pd.Series(0.045, index=prices.index, name="annual_yield")
+    summary, _, _, daily = app.calculate_portfolio_risk(
+        prices, {"AAA": 0.6, "BBB": 0.4}, risk_free_yield=yields,
+    )
+    expected_daily = (1.045 ** (1 / app.TRADING_DAYS_PER_YEAR)) - 1
+    assert summary["risk_free_rate_source"] == "dated annualized yield series"
+    assert daily["risk_free_return"].iloc[0] == pytest.approx(expected_daily)
+
+
+def test_calculate_portfolio_risk_rejects_rf_series_that_starts_too_late() -> None:
+    prices = sample_prices()
+    yields = pd.Series([0.045], index=[prices.index[-1]], name="annual_yield")
+    with pytest.raises(ValueError, match="does not cover portfolio return date"):
+        app.calculate_portfolio_risk(prices, {"AAA": 1.0}, risk_free_yield=yields)
