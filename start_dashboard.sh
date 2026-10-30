@@ -2,7 +2,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
-PYTHON_BIN="\${PYTHON_BIN:-python3}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 if [[ -x ".venv/bin/python" ]]; then
   PYTHON_BIN=".venv/bin/python"
 fi
@@ -19,5 +19,5 @@ fi
 
 exec "$PYTHON_BIN" -m streamlit run dashboard.py \
   --server.address 0.0.0.0 \
-  --server.port "\${PORT:-8501}" \
+  --server.port "${PORT:-8501}" \
   --server.headless true
