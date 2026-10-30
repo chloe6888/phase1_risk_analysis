@@ -148,11 +148,11 @@ def fetch_yahoo_snapshot(ticker: str, ticker_factory: Callable[[str], Any] | Non
     debt = _number(info.get("totalDebt"))
     market_cap = _number(info.get("marketCap"))
     forward_eps = _number(info.get("forwardEps"))
-    eps_source = "Yahoo Finance info.forwardEps" if forward_eps is not None else None
+    eps_source = "Yahoo Finance info.forwardEps (per listed share; quote-currency denomination assumed)" if forward_eps is not None else None
     if forward_eps is None:
         forward_eps = _number(info.get("trailingEps"))
         if forward_eps is not None:
-            eps_source = "Yahoo Finance info.trailingEps (forward EPS unavailable)"
+            eps_source = "Yahoo Finance info.trailingEps (per listed share; quote-currency denomination assumed; forward EPS unavailable)"
 
     fcf = _number(info.get("freeCashflow"))
     fcf_source = "Yahoo Finance info.freeCashflow" if fcf is not None else None
@@ -211,6 +211,9 @@ def fetch_yahoo_snapshot(ticker: str, ticker_factory: Callable[[str], Any] | Non
         "currency": currency,
         "financial_currency": financial_currency,
         "currency_mismatch": currency_mismatch,
+        "dcf_currency_mismatch": currency_mismatch,
+        "eps_currency": currency,
+        "pe_currency_mismatch": False,
         "current_price": price,
         "price_date": price_date,
         "fetched_at_utc": fetched_at,
