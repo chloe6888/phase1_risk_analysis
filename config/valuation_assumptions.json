@@ -14,21 +14,21 @@
       "scenarios": {
         "bear": {
           "fcf_growth": 0.05,
-          "discount_rate": 0.1,
           "terminal_growth": 0.02,
-          "fair_pe": 18
+          "fair_pe": 18,
+          "cost_of_equity": 0.1
         },
         "base": {
           "fcf_growth": 0.09,
-          "discount_rate": 0.09,
           "terminal_growth": 0.025,
-          "fair_pe": 21
+          "fair_pe": 21,
+          "cost_of_equity": 0.09
         },
         "bull": {
           "fcf_growth": 0.13,
-          "discount_rate": 0.085,
           "terminal_growth": 0.03,
-          "fair_pe": 24
+          "fair_pe": 24,
+          "cost_of_equity": 0.085
         }
       }
     },
@@ -39,21 +39,21 @@
       "scenarios": {
         "bear": {
           "fcf_growth": 0.05,
-          "discount_rate": 0.105,
           "terminal_growth": 0.02,
-          "fair_pe": 18
+          "fair_pe": 18,
+          "cost_of_equity": 0.105
         },
         "base": {
           "fcf_growth": 0.12,
-          "discount_rate": 0.1,
           "terminal_growth": 0.025,
-          "fair_pe": 23
+          "fair_pe": 23,
+          "cost_of_equity": 0.1
         },
         "bull": {
           "fcf_growth": 0.2,
-          "discount_rate": 0.095,
           "terminal_growth": 0.03,
-          "fair_pe": 28
+          "fair_pe": 28,
+          "cost_of_equity": 0.095
         }
       }
     },
@@ -64,21 +64,21 @@
       "scenarios": {
         "bear": {
           "fcf_growth": -0.05,
-          "discount_rate": 0.12,
           "terminal_growth": 0.015,
-          "fair_pe": 10
+          "fair_pe": 10,
+          "cost_of_equity": 0.12
         },
         "base": {
           "fcf_growth": 0.08,
-          "discount_rate": 0.11,
           "terminal_growth": 0.02,
-          "fair_pe": 14
+          "fair_pe": 14,
+          "cost_of_equity": 0.11
         },
         "bull": {
           "fcf_growth": 0.18,
-          "discount_rate": 0.1,
           "terminal_growth": 0.025,
-          "fair_pe": 18
+          "fair_pe": 18,
+          "cost_of_equity": 0.1
         }
       }
     },
@@ -89,21 +89,21 @@
       "scenarios": {
         "bear": {
           "fcf_growth": -0.05,
-          "discount_rate": 0.12,
           "terminal_growth": 0.015,
-          "fair_pe": 10
+          "fair_pe": 10,
+          "cost_of_equity": 0.12
         },
         "base": {
           "fcf_growth": 0.08,
-          "discount_rate": 0.11,
           "terminal_growth": 0.02,
-          "fair_pe": 14
+          "fair_pe": 14,
+          "cost_of_equity": 0.11
         },
         "bull": {
           "fcf_growth": 0.18,
-          "discount_rate": 0.1,
           "terminal_growth": 0.025,
-          "fair_pe": 18
+          "fair_pe": 18,
+          "cost_of_equity": 0.1
         }
       }
     }
