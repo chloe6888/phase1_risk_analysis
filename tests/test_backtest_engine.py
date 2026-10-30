@@ -161,3 +161,21 @@ def test_load_risk_free_yield_requires_explicit_decimal_column(tmp_path) -> None
     pd.DataFrame({"Date": ["2024-01-01"], "yield_pct": [4.0]}).to_csv(path, index=False)
     with pytest.raises(ValueError, match="annual_yield"):
         app.load_risk_free_yield(path)
+
+
+def test_backtest_charges_terminal_liquidation_cost_and_turnover() -> None:
+    index = pd.bdate_range("2024-01-01", periods=4)
+    prices = pd.DataFrame({
+        "AAA": [100.0, 100.0, 100.0, 100.0],
+        "SPY": [100.0, 101.0, 102.0, 103.0],
+    }, index=index)
+    targets = pd.DataFrame({"AAA": 0.5}, index=index)
+    summary, daily, _, _ = app.run_backtest(
+        prices, targets, benchmark="SPY", transaction_cost_bps=10, slippage_bps=0,
+    )
+    expected_cost = 0.5 * 10 / 10_000
+    assert daily.loc[index[-1], "liquidation_turnover"] == pytest.approx(0.5)
+    assert daily.loc[index[-1], "terminal_liquidation_cost_return"] == pytest.approx(expected_cost)
+    assert summary["terminal_liquidation_turnover"] == pytest.approx(0.5)
+    assert summary["terminal_liquidation_cost_return"] == pytest.approx(expected_cost)
+    assert daily.loc[index[-1], "turnover"] >= daily.loc[index[-1], "rebalance_turnover"]
