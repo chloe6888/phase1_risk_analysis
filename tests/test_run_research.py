@@ -52,6 +52,8 @@ def test_render_report_combines_risk_backtest_and_validation() -> None:
     assert "滚动样本外验证" in report
     assert "历史单期 VaR" in report
     assert "不执行交易" in report
+    assert "请求数据区间： 2020-01-01 至 2026-01-01" in report
+    assert "2020-01-01 to 2026-01-01" not in report
     assert "25.00%" in report
 
 
