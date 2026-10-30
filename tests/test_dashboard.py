@@ -192,6 +192,8 @@ def test_build_decision_review_marks_holdings_and_watchlist_separately() -> None
     by_ticker = result.set_index("股票代码")
     assert by_ticker.loc["MU", "持仓状态"] == "当前持仓"
     assert by_ticker.loc["MU", "持股数量"] == 10
+    assert by_ticker.loc["MU", "DCF 区间判断"] == "处于两条观察线之间"
+    assert by_ticker.loc["MU", "估值可信度"] == "低"
     assert by_ticker.loc["GOOG", "持仓状态"] == "观察标的"
     assert pd.isna(by_ticker.loc["GOOG", "持股数量"])
 
