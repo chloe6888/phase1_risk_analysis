@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -276,7 +276,14 @@ def get_snapshot(
     if cached and not refresh and age is not None and age <= max_cache_age_hours:
         cached = dict(cached)
         cached["cache_age_hours"] = age
-        cached["stale_data"] = False
+        price_date = cached.get("price_date")
+        price_is_old = False
+        if price_date:
+            try:
+                price_is_old = (date.today() - date.fromisoformat(str(price_date))).days > 7
+            except ValueError:
+                price_is_old = True
+        cached["stale_data"] = bool(price_is_old)
         return cached
     try:
         snapshot = fetcher(ticker.strip().upper())
