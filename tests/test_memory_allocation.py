@@ -191,3 +191,49 @@ def test_preserving_etf_scenario_flags_issuer_exposure_from_etf_alone() -> None:
     cap_rows = decisions[decisions['scenario'] == 'cap_only_preserve_etf'].set_index('ticker')
     assert cap_rows.loc['MU', 'target_shares'] == 0
     assert cap_rows.loc['SKHY', 'target_shares'] == 0
+
+
+def test_memory_allocation_records_lookthrough_source_provenance() -> None:
+    summary, _, _ = app.analyze_memory_positions(
+        sample_holdings(), sample_prices(),
+        dram_lookthrough={"MU": 0.30, "SKHY": 0.22},
+        lookthrough_asof="2026-10-28",
+        lookthrough_source="Roundhill issuer CSV",
+        lookthrough_source_sha256="a" * 64,
+    )
+    assert summary["lookthrough_asof"] == "2026-10-28"
+    assert summary["lookthrough_source"] == "Roundhill issuer CSV"
+    assert summary["lookthrough_source_sha256"] == "a" * 64
+
+
+def test_cli_imports_dated_dram_issuer_snapshot(tmp_path: Path) -> None:
+    holdings_path = tmp_path / "holdings.csv"
+    sample_holdings().to_csv(holdings_path, index=False)
+    prices_path = tmp_path / "close_prices.csv"
+    sample_prices().to_csv(prices_path)
+    adjusted_path = tmp_path / "adjusted_prices.csv"
+    sample_prices().to_csv(adjusted_path)
+    snapshot_path = tmp_path / "DRAM_lookthrough_2026-10-29.json"
+    snapshot_path.write_text(json.dumps({
+        "as_of": "2026-10-29",
+        "source_name": "Roundhill issuer CSV",
+        "source_sha256": "b" * 64,
+        "issuer_weights_pct": {"MU": 30.0, "SKHY": 22.0},
+    }), encoding="utf-8")
+    output_dir = tmp_path / "output"
+    subprocess.run(
+        [
+            sys.executable, str(Path(__file__).resolve().parents[1] / "memory_allocation.py"),
+            "--holdings-csv", str(holdings_path),
+            "--prices", str(prices_path),
+            "--adjusted-prices", str(adjusted_path),
+            "--dram-lookthrough-json", str(snapshot_path),
+            "--output-dir", str(output_dir),
+        ],
+        check=True, capture_output=True, text=True,
+    )
+    summary = json.loads((output_dir / "memory_allocation_summary.json").read_text())
+    assert summary["lookthrough_asof"] == "2026-10-29"
+    assert summary["lookthrough_source"] == "Roundhill issuer CSV"
+    assert summary["lookthrough_source_sha256"] == "b" * 64
+    assert summary["dram_lookthrough_weights"] == {"MU": 0.3, "SKHY": 0.22}
