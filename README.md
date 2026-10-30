@@ -287,7 +287,7 @@ python -m streamlit run dashboard.py --server.address 0.0.0.0 --server.port 8501
 
 Codespaces 启动后，在底部 Ports 面板打开 8501 端口。建议端口可见性保持 Private。启动脚本优先使用项目已有的 `.venv`，否则使用当前 Python 环境；仅在 Streamlit 缺失时安装可选依赖。
 
-仪表盘侧边栏只保留持仓导入和常用运行入口，高级回测参数折叠在“高级研究设置”中。提交研究后由独立后台工作进程执行，页面不再同步等待整个研究流程；同一时刻只允许一个研究任务。任务状态和日志分别写入 `outputs/runs/<task_id>/status.json` 与 `worker.log`。
+仪表盘以中文为主，研究入口放在页面主体，打开页面即可上传持仓或填写组合权重；常用研究参数直接可见，高级回测参数折叠在“高级研究设置”中。账户概览、组合风险、策略回测、稳健性检验、存储主题和研究报告分别显示在独立页面标签中。提交研究后由独立后台工作进程执行，页面不再同步等待整个研究流程；同一时刻只允许一个研究任务。任务状态和日志分别写入 `outputs/runs/<task_id>/status.json` 与 `worker.log`。
 
 每次运行的研究产物写入独立的 `outputs/runs/<task_id>/artifacts/`。只有当进程成功退出且同时生成 `research_report.md` 和 `research_run_manifest.json` 后，才原子更新 `outputs/latest_success.json`。运行失败或进程意外退出时，上一次完整成功的报告仍然可用；仪表盘从该指针读取结果。首次部署时，如果还没有成功运行记录，会兼容读取旧版 `outputs/` 根目录下的结果。
 
