@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -19,7 +20,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_PRICE_PANEL = ROOT / "data" / "raw" / "adjusted_close_panel.csv"
-DEFAULT_OUTPUT_DIR = ROOT / "outputs"
+DEFAULT_OUTPUT_DIR = Path(os.environ.get("PHASE1_OUTPUT_DIR", str(ROOT / "outputs"))).resolve()
 TRADING_DAYS_PER_YEAR = 252
 
 
