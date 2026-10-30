@@ -227,32 +227,70 @@ def analyze_memory_positions(
     if "cap_only_preserve_etf" not in scenarios:
         dram_value = float(value_map["DRAM"])
         dram_weight_pct = dram_value / denominator * 100.0
-        direct_values = {ticker: float(value_map[ticker]) for ticker in ("MU", "SKHY")}
-        direct_total_value = sum(direct_values.values())
         memory_direct_budget = max(0.0, denominator * max_memory_weight_pct / 100.0 - dram_value)
-        scale_candidates = [1.0]
-        if direct_total_value > 0:
-            scale_candidates.append(memory_direct_budget / direct_total_value)
-        for ticker in ("MU", "SKHY"):
-            issuer_direct_budget = max(
+        issuer_budgets = {
+            ticker: max(
                 0.0,
                 denominator * max_issuer_exposure_pct / 100.0
                 - dram_value * float(lookthrough[ticker]),
             )
-            if direct_values[ticker] > 0:
-                scale_candidates.append(issuer_direct_budget / direct_values[ticker])
-        scale = min(max(value, 0.0) for value in scale_candidates)
-        cap_targets: dict[str, float] = {}
+            for ticker in ("MU", "SKHY")
+        }
+        direct_values = {ticker: float(value_map[ticker]) for ticker in ("MU", "SKHY")}
+        direct_total_value = sum(direct_values.values())
+        scales = [1.0]
+        if direct_total_value > 0:
+            scales.append(memory_direct_budget / direct_total_value)
         for ticker in ("MU", "SKHY"):
-            raw_target_shares = float(shares_map[ticker]) * scale
-            target_quantity = (
-                round(raw_target_shares, 4)
-                if fractional_shares
-                else int(math.floor(raw_target_shares + 1e-9))
+            if direct_values[ticker] > 0:
+                scales.append(issuer_budgets[ticker] / direct_values[ticker])
+        proportional_scale = min(max(value, 0.0) for value in scales)
+        cap_quantities: dict[str, float] = {}
+        if fractional_shares:
+            for ticker in ("MU", "SKHY"):
+                quantity_limit = min(
+                    float(shares_map[ticker]) * proportional_scale,
+                    issuer_budgets[ticker] / float(price_map[ticker]),
+                )
+                cap_quantities[ticker] = round(max(0.0, quantity_limit), 4)
+        else:
+            max_mu = min(
+                int(math.floor(float(shares_map["MU"]) + 1e-9)),
+                int(math.floor(issuer_budgets["MU"] / float(price_map["MU"]) + 1e-9)),
             )
-            cap_targets[ticker] = (
-                float(target_quantity) * float(price_map[ticker]) / denominator * 100.0
+            max_skhy = min(
+                int(math.floor(float(shares_map["SKHY"]) + 1e-9)),
+                int(math.floor(issuer_budgets["SKHY"] / float(price_map["SKHY"]) + 1e-9)),
             )
+            desired = {
+                ticker: float(shares_map[ticker]) * proportional_scale
+                for ticker in ("MU", "SKHY")
+            }
+            best_value = -1.0
+            best_distance = float("inf")
+            best_pair = (0, 0)
+            for mu_quantity in range(max_mu + 1):
+                mu_value = mu_quantity * float(price_map["MU"])
+                for skhy_quantity in range(max_skhy + 1):
+                    skhy_value = skhy_quantity * float(price_map["SKHY"])
+                    direct_value = mu_value + skhy_value
+                    if direct_value > memory_direct_budget + 1e-8:
+                        continue
+                    distance = (
+                        (mu_quantity - desired["MU"]) ** 2
+                        + (skhy_quantity - desired["SKHY"]) ** 2
+                    )
+                    if direct_value > best_value + 1e-8 or (
+                        abs(direct_value - best_value) <= 1e-8 and distance < best_distance
+                    ):
+                        best_value = direct_value
+                        best_distance = distance
+                        best_pair = (mu_quantity, skhy_quantity)
+            cap_quantities["MU"], cap_quantities["SKHY"] = map(float, best_pair)
+        cap_targets = {
+            ticker: cap_quantities[ticker] * float(price_map[ticker]) / denominator * 100.0
+            for ticker in ("MU", "SKHY")
+        }
         cap_targets["DRAM"] = dram_weight_pct
         scenarios["cap_only_preserve_etf"] = cap_targets
     scenario_rows: list[dict[str, object]] = []

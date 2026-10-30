@@ -149,7 +149,7 @@ def test_cap_only_scenario_preserves_dram_and_minimizes_direct_stock_trim() -> N
         sample_holdings(), sample_prices(), max_memory_weight_pct=25,
     )
     cap = decisions[decisions["scenario"] == "cap_only_preserve_etf"].set_index("ticker")
-    assert cap.loc["MU", "target_shares"] == 1
+    assert cap.loc["MU", "target_shares"] == 2
     assert cap.loc["SKHY", "target_shares"] == 3
     assert cap.loc["DRAM", "target_shares"] == 40
     assert cap.loc["MU", "action"] == "REDUCE_TO_TARGET"
