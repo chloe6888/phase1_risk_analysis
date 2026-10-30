@@ -136,6 +136,15 @@ def run_stability_analysis(
         top_n=baseline_top_n,
         benchmark=benchmark,
     )
+    available_signal_rows = target.index[target.sum(axis=1) > 0]
+    if available_signal_rows.empty:
+        raise ValueError("The baseline signal has no invested observations; increase price history or shorten the lookback.")
+    # All cadence variants start with the same cash balance on the first date
+    # for which a momentum signal exists. Lower-frequency variants remain in
+    # cash until their first scheduled rebalance instead of starting later.
+    comparison_start = available_signal_rows[0]
+    comparison_prices = adjusted_close.loc[comparison_start:]
+    comparison_target = target.loc[comparison_start:]
 
     cadence_rows: list[dict[str, Any]] = []
     new_returns: dict[str, pd.Series] = {}
@@ -146,14 +155,15 @@ def run_stability_analysis(
 
     for frequency in rebalance_freqs:
         summary, daily, _, equity = run_backtest(
-            adjusted_close,
-            target,
+            comparison_prices,
+            comparison_target,
             benchmark=benchmark,
             transaction_cost_bps=transaction_cost_bps,
             slippage_bps=slippage_bps,
             risk_free_rate_annual=risk_free_rate_annual,
             risk_free_yield=risk_free_yield,
             rebalance_freq=frequency,
+            include_cash_before_first_investment=True,
         )
         strategy = summary["strategy"]
         legacy = summary["legacy_strategy"]
