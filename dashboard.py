@@ -1099,12 +1099,38 @@ def main() -> None:
             )
             exposures = memory.get("lookthrough_issuer_weights_pct", {})
             if exposures:
-                st.markdown("### DRAM 内部的发行人穿透敞口")
+                st.markdown("### 当前组合的发行人穿透敞口")
                 exposure_frame = pd.DataFrame([
-                    {"发行人": key, "穿透敞口占比": f"{float(value):.2f}%"}
+                    {
+                        "发行人": key,
+                        "直接持股 + DRAM 间接敞口": f"{float(value):.2f}%",
+                        "复核上限": f"{float(memory.get('max_issuer_exposure_pct', 12.0)):.2f}%",
+                        "是否超限": "是" if float(value) > float(memory.get("max_issuer_exposure_pct", 12.0)) else "否",
+                    }
                     for key, value in exposures.items()
                 ])
                 st.dataframe(exposure_frame, hide_index=True, use_container_width=True)
+
+            scenario_weights = memory.get("scenario_memory_weights_pct", {})
+            scenario_exposures = memory.get("scenario_lookthrough_exposures_pct", {})
+            scenario_status = memory.get("scenario_issuer_limit_status", {})
+            if scenario_weights and scenario_exposures:
+                st.markdown("### 调整方案达标检查")
+                st.caption("这里显示按目标股数调整后，存储主题总仓位和 MU/SK hynix 穿透敞口是否仍超过风险预算。若 ETF 自身造成超限，仅减少直接持股无法消除该敞口。")
+                scenario_rows = []
+                for scenario_name, total_weight in scenario_weights.items():
+                    issuer_values = scenario_exposures.get(scenario_name, {})
+                    issuer_flags = scenario_status.get(scenario_name, {})
+                    scenario_rows.append({
+                        "调整方案": VALUE_LABELS.get(scenario_name, scenario_name),
+                        "存储主题总占比": f"{float(total_weight):.2f}%",
+                        "MU 调整后穿透敞口": f"{float(issuer_values.get('MU', 0.0)):.2f}%",
+                        "SK hynix 调整后穿透敞口": f"{float(issuer_values.get('SKHY', 0.0)):.2f}%",
+                        "MU 发行人超限": "是" if issuer_flags.get("MU", False) else "否",
+                        "SK hynix 发行人超限": "是" if issuer_flags.get("SKHY", False) else "否",
+                        "主题仓位超限": "是" if float(total_weight) > float(memory.get("max_memory_weight_pct", 25.0)) else "否",
+                    })
+                st.dataframe(pd.DataFrame(scenario_rows), hide_index=True, use_container_width=True)
         if memory_positions is not None:
             st.markdown("### 最新价格、趋势与波动")
             st.dataframe(_display_frame(memory_positions), use_container_width=True)
