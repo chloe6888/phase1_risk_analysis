@@ -558,8 +558,42 @@ def main() -> None:
             available_financial_columns = [name for name in financial_columns if name in valuation_summary.columns]
             if available_financial_columns:
                 st.markdown("#### 经营与盈利质量")
+                financial_view = valuation_summary[available_financial_columns].copy()
+                percent_columns = [
+                    "revenue_growth_yoy", "gross_margin", "operating_margin",
+                    "net_margin", "return_on_equity", "return_on_assets",
+                ]
+                for column in percent_columns:
+                    if column in financial_view.columns:
+                        financial_view[column] = pd.to_numeric(
+                            financial_view[column], errors="coerce"
+                        ).map(lambda value: f"{value:.1%}" if pd.notna(value) else "N/A")
+                amount_columns = [
+                    "revenue", "gross_profit", "operating_income", "net_income", "ebitda",
+                ]
+                for column in amount_columns:
+                    if column in financial_view.columns:
+                        financial_view[column] = pd.to_numeric(
+                            financial_view[column], errors="coerce"
+                        ).map(lambda value: f"{value:,.0f}" if pd.notna(value) else "N/A")
+                financial_view = financial_view.rename(columns={
+                    "ticker": "股票",
+                    "revenue": "营收",
+                    "gross_profit": "毛利",
+                    "operating_income": "营业利润",
+                    "net_income": "净利润",
+                    "ebitda": "EBITDA",
+                    "revenue_growth_yoy": "营收同比",
+                    "gross_margin": "毛利率",
+                    "operating_margin": "营业利润率",
+                    "net_margin": "净利率",
+                    "return_on_equity": "ROE",
+                    "return_on_assets": "ROA",
+                    "trailing_pe": "TTM PE",
+                    "forward_pe": "Forward PE",
+                })
                 st.dataframe(
-                    valuation_summary[available_financial_columns],
+                    financial_view,
                     hide_index=True,
                     use_container_width=True,
                 )
