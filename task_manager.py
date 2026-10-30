@@ -129,22 +129,23 @@ def active_output_dir(repository_root: Path = ROOT) -> Path:
     return outputs
 
 
-def _acquire_launch_lock() -> int:
-    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+def _acquire_launch_lock(output_root: Path) -> tuple[int, Path]:
+    output_root.mkdir(parents=True, exist_ok=True)
+    lock_file = output_root / ".task-launch.lock"
     try:
-        return os.open(LAUNCH_LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        return os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), lock_file
     except FileExistsError as exc:
         try:
-            age = time.time() - LAUNCH_LOCK_FILE.stat().st_mtime
+            age = time.time() - lock_file.stat().st_mtime
         except OSError:
             age = 0
         if age > 120:
             try:
-                LAUNCH_LOCK_FILE.unlink()
+                lock_file.unlink()
             except OSError:
                 pass
             try:
-                return os.open(LAUNCH_LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                return os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), lock_file
             except FileExistsError:
                 pass
         raise TaskAlreadyRunning("另一个任务正在提交，请稍后再试。") from exc
@@ -159,7 +160,7 @@ def start_task(command: Sequence[str], repository_root: Path = ROOT) -> dict[str
     output_root = root / "outputs"
     runs_root = output_root / "runs"
     runs_root.mkdir(parents=True, exist_ok=True)
-    lock_fd = _acquire_launch_lock()
+    lock_fd, lock_file = _acquire_launch_lock(output_root)
     try:
         current = get_current_task(root)
         if current and current.get("state") in ACTIVE_STATES:
@@ -227,7 +228,7 @@ def start_task(command: Sequence[str], repository_root: Path = ROOT) -> dict[str
     finally:
         os.close(lock_fd)
         try:
-            LAUNCH_LOCK_FILE.unlink()
+            lock_file.unlink()
         except FileNotFoundError:
             pass
 
