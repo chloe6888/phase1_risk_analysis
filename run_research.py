@@ -57,6 +57,20 @@ def metrics_table(metrics: dict[str, Any]) -> list[str]:
     return rows
 
 
+def _localized_holdings_alert(alert: dict[str, Any]) -> str:
+    """Render concentration alerts in Chinese from their structured fields."""
+    kind = str(alert.get("kind", ""))
+    name = str(alert.get("name", "未知标的"))
+    weight = alert.get("weight_pct")
+    threshold = alert.get("threshold_pct")
+    if kind == "single_position_concentration" and weight is not None and threshold is not None:
+        return f"{name} 占导入股票/ETF持仓 {float(weight):.1f}%，超过 {float(threshold):.1f}% 的单一持仓复核阈值。"
+    if kind in {"risk_group_concentration", "subgroup_concentration"} and weight is not None and threshold is not None:
+        group_label = "风险主题" if kind == "risk_group_concentration" else "行业分类"
+        return f"{group_label}“{name}”占导入股票/ETF持仓 {float(weight):.1f}%，超过 {float(threshold):.1f}% 的复核阈值。"
+    return str(alert.get("message", ""))
+
+
 def render_report(
     *,
     generated_at: str,
@@ -117,7 +131,8 @@ def render_report(
         if holdings_alerts:
             lines.extend(["### 集中度风险提醒", ""])
             for alert in holdings_alerts:
-                lines.append(f"- **{alert.get('level', 'info')}** {alert.get('message', '')}")
+                level = {"warning": "提醒", "critical": "严重"}.get(str(alert.get("level", "info")), "提示")
+                lines.append(f"- **{level}** {_localized_holdings_alert(alert)}")
             lines.append("")
         else:
             lines.extend(["- 导入持仓未触发单一持仓或分组集中度阈值。", ""])
@@ -131,12 +146,23 @@ def render_report(
             denominator_warning = "本页占比以所提供的账户总净资产为分母；请确认该金额已包含现金、其他资产及负债。"
         elif denominator_warning.startswith("Cash, bonds, other accounts and financing are not included"):
             denominator_warning = "当前占比仅按导入的股票和 ETF 持仓计算，尚未包含现金、债券、其他账户及融资负债。"
+        elif denominator_warning.startswith("Imported listed positions only"):
+            denominator_warning = "当前占比仅按导入的股票和 ETF 持仓计算，不包含其他未导入资产。"
+        memory_action = str(memory_summary.get("overall_action", "N/A"))
+        memory_current = float(memory_summary.get("memory_sleeve_weight_pct", 0.0))
+        memory_limit = float(memory_summary.get("max_memory_weight_pct", 0.0))
+        if memory_action == "REDUCE_MEMORY_SLEEVE":
+            memory_reason = f"当前存储主题占参考组合 {memory_current:.1f}%，高于 {memory_limit:.1f}% 的风险预算上限；应复核主题仓位和发行人穿透敞口。"
+        elif memory_action == "WITHIN_MEMORY_LIMIT":
+            memory_reason = f"当前存储主题占参考组合 {memory_current:.1f}%，未超过 {memory_limit:.1f}% 的风险预算上限；仍需持续跟踪 ETF 穿透持仓。"
+        else:
+            memory_reason = "规则判断原因未提供，请查看原始风险诊断明细。"
         lines += [
             "## MU / SKHY / DRAM 存储主题分析", "",
-            f"- 当前存储主题占比： {fmt_pct(float(memory_summary.get('memory_sleeve_weight_pct', 0.0)) / 100.0)}",
-            f"- 风险预算上限： {fmt_pct(float(memory_summary.get('max_memory_weight_pct', 0.0)) / 100.0)}",
-            f"- 规则检查结果： { {'REDUCE_MEMORY_SLEEVE': '存储主题仓位超限', 'WITHIN_MEMORY_LIMIT': '存储主题仓位在限制内'}.get(str(memory_summary.get('overall_action', 'N/A')), memory_summary.get('overall_action', 'N/A'))}",
-            f"- 判断依据： {memory_summary.get('overall_reason', 'N/A')}",
+            f"- 当前存储主题占比： {fmt_pct(memory_current / 100.0)}",
+            f"- 风险预算上限： {fmt_pct(memory_limit / 100.0)}",
+            f"- 规则检查结果： { {'REDUCE_MEMORY_SLEEVE': '存储主题仓位超限', 'WITHIN_MEMORY_LIMIT': '存储主题仓位在限制内'}.get(memory_action, '需人工复核')}",
+            f"- 判断依据： {memory_reason}",
             f"- DRAM 穿透持仓假设日期： {memory_summary.get('lookthrough_asof', 'N/A')}",
             f"- 发行人穿透敞口：" + "; ".join(
                 f"{ticker}: {float(weight):.1f}%" for ticker, weight in memory_summary.get("lookthrough_issuer_weights_pct", {}).items()
