@@ -300,7 +300,7 @@ python run_valuation.py --tickers GOOG,NVDA,MU,SKHY --refresh
 
 **重要模型口径：** Yahoo Finance 的 CFO 减资本开支自由现金流并不是完整重建的 FCFE。当前 DCF 将其作为股权现金流代理，使用显式配置的股权资本成本折现，不再对结果加现金或减债务，以避免重复调整；它是指示性简化模型，不是完整机构级 DCF。远期 PE 使用数据源的 `forwardEps`；若缺失则回退到 `trailingEps`，并在报告中标记来源。
 
-MU、SKHY 属于周期性存储公司。单一年度自由现金流可能受到存储价格周期影响，系统会将它们标记为低置信度；应在 `config/valuation_assumptions.json` 中填入经跨周期研究的 `normalized_fcf`，并填写 `normalized_fcf_currency`。对于 SKHY ADR，若输入的是美元正常化 FCF，应明确设为 `USD`；若仍为韩元，则 DCF 会继续暂停，直到完成换汇。若数据字段不完整或非正数，对应模型会明确显示不可用，不会用虚构数字补齐。 如果报价币种与现金流报告币种不一致，系统会暂停 DCF，避免未换汇直接计算；若数据源的每股 EPS 以报价币种表示，PE 仍可独立计算并显示 EPS 来源。
+MU、SKHY 属于周期性存储公司。单一年度自由现金流可能受到存储价格周期影响，系统会将它们标记为低置信度；应在 `config/valuation_assumptions.json` 中填入经跨周期研究的 `normalized_fcf`，并填写 `normalized_fcf_currency`。对于 SKHY，官方 ADR 资料显示 1 ADS 对应 10 股韩国普通股；由于数据源的 `sharesOutstanding` 和 `forwardEps` 是否已转换为每 ADS 口径需要独立核实，默认 `per_share_basis_verified=false`，因此 DCF/PE 都会暂时停算。核对数据源的股数与 EPS 的证券单位后，才可将其设为 true。若输入美元正常化 FCF，应明确把 `normalized_fcf_currency` 设为 `USD`；若仍为韩元，则 DCF 会继续暂停，直到完成换汇。若数据字段不完整或非正数，对应模型会明确显示不可用，不会用虚构数字补齐。 如果报价币种与现金流报告币种不一致，系统会暂停 DCF，避免未换汇直接计算；若数据源的每股 EPS 以报价币种表示，PE 仍可独立计算并显示 EPS 来源。
 
 买入观察线 = 基准情景估值 × (1 - 安全边际)；卖出复核线 = 基准情景估值 × (1 + 高估溢价)。DCF 与 PE 两组线独立展示，不会自动合成为一个目标价。它们不是自动买入/卖出信号；执行前仍需检查最新财报、估值假设、技术趋势、仓位和组合风险。
 
