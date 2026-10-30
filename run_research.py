@@ -164,7 +164,8 @@ def render_report(
         lines += [
             "## Portfolio risk", "",
             f"- Period: {portfolio.get('start_date', 'N/A')} to {portfolio.get('end_date', 'N/A')}",
-            f"- Return observations: {portfolio.get('observations', 'N/A')}", "",
+            f"- Return observations: {portfolio.get('observations', 'N/A')}",
+            f"- Risk-free rate source: {portfolio.get('risk_free_rate_source', 'constant annual rate')}", "",
             "| Metric | Value |", "|---|---:|", *metrics_table(portfolio),
             f"| Historical one-period VaR | {fmt_pct(portfolio.get('historical_var_one_period'))} |",
             f"| Historical one-period CVaR | {fmt_pct(portfolio.get('historical_cvar_one_period'))} |", "",
@@ -388,6 +389,8 @@ def main() -> None:
     risk_cmd = [py, str(ROOT / "portfolio_risk.py"), "--weights", weights_text, "--risk-free-rate", str(args.risk_free_rate)]
     if args.portfolio_value is not None:
         risk_cmd += ["--portfolio-value", str(args.portfolio_value)]
+    if args.risk_free_yield_csv:
+        risk_cmd += ["--risk-free-yield-csv", str(args.risk_free_yield_csv)]
     for name, shocks in args.stress_scenario:
         packed = ",".join(f"{ticker}={shock}" for ticker, shock in shocks.items())
         risk_cmd += ["--scenario", f"{name}:{packed}"]
