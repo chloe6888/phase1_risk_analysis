@@ -32,11 +32,12 @@ DEFAULT_SCENARIOS: dict[str, dict[str, float]] = {
     "etf_core": {"MU": 0.0, "SKHY": 0.0, "DRAM": 15.0},
     "direct_only": {"MU": 8.0, "SKHY": 8.0, "DRAM": 0.0},
 }
-# Indicative look-through exposure using public ETF holdings data checked on
-# 2026-10-28. These are configuration assumptions, not official fixed weights:
-# DRAM may change positions and may use swaps. Refresh before a live decision.
-DEFAULT_DRAM_LOOKTHROUGH = {"MU": 0.2825, "SKHY": 0.2132}
-DEFAULT_LOOKTHROUGH_ASOF = "2026-10-28"
+# Indicative look-through exposure using the 2026-10-29 daily holdings file:
+# Micron direct + swap lines = 27.87%; SK hynix direct + swap lines = 21.14%.
+# These are configuration assumptions, not fixed weights; refresh before trading.
+DEFAULT_DRAM_LOOKTHROUGH = {"MU": 0.2787, "SKHY": 0.2114}
+DEFAULT_LOOKTHROUGH_ASOF = "2026-10-29"
+DEFAULT_ADD_BUFFER_PCT = 3.0
 DEFAULT_MEMORY_LIMIT_PCT = 25.0
 DEFAULT_ISSUER_LIMIT_PCT = 12.0
 
@@ -190,6 +191,16 @@ def analyze_memory_positions(
         direct_weight = position_value / denominator * 100.0
         additional_lookthrough = dram_value * float(lookthrough.get(ticker, 0.0)) if ticker in ("MU", "SKHY") else 0.0
         trend = diagnostics.loc[ticker].to_dict()
+        if current_memory_weight > max_memory_weight_pct:
+            add_permission = "NO_ADD_MEMORY_LIMIT"
+        elif current_memory_weight > max(0.0, max_memory_weight_pct - DEFAULT_ADD_BUFFER_PCT):
+            add_permission = "WAIT_FOR_MEMORY_HEADROOM"
+        elif ticker in issuer_weights and issuer_weights[ticker] > max_issuer_exposure_pct:
+            add_permission = "NO_ADD_ISSUER_LOOKTHROUGH_LIMIT"
+        elif trend.get("trend_flag") != "POSITIVE_TREND_BUT_SIZE_LIMITS_STILL_APPLY":
+            add_permission = "WAIT_FOR_TREND_CONFIRMATION"
+        else:
+            add_permission = "STAGED_ADD_REVIEW_ONLY"
         position_rows.append({
             "ticker": ticker,
             "current_shares": current_shares,
@@ -200,6 +211,7 @@ def analyze_memory_positions(
             "dram_lookthrough_additional_value": additional_lookthrough,
             "lookthrough_issuer_exposure_value": lookthrough_values.get(ticker, position_value),
             "lookthrough_issuer_exposure_pct": issuer_weights.get(ticker, direct_weight),
+            "add_permission": add_permission,
             **trend,
         })
     current_positions = pd.DataFrame(position_rows).set_index("ticker")
@@ -207,6 +219,24 @@ def analyze_memory_positions(
     scenarios = {name: dict(values) for name, values in (target_scenarios or DEFAULT_SCENARIOS).items()}
     if "balanced" not in scenarios:
         raise ValueError("At least a 'balanced' target scenario is required.")
+    # Minimum-trim option: preserve the current DRAM ETF quantity and scale
+    # only the two direct stock positions enough to bring the memory sleeve
+    # under the configured cap. This avoids forcing a DRAM sale just because
+    # the combined sleeve is overweight.
+    if "cap_only_preserve_etf" not in scenarios:
+        dram_weight_pct = float(value_map["DRAM"]) / denominator * 100.0
+        direct_weights = {
+            ticker: float(value_map[ticker]) / denominator * 100.0
+            for ticker in ("MU", "SKHY")
+        }
+        direct_total_weight = sum(direct_weights.values())
+        direct_budget_pct = max(0.0, max_memory_weight_pct - dram_weight_pct)
+        scale = min(1.0, direct_budget_pct / direct_total_weight) if direct_total_weight > 0 else 1.0
+        scenarios["cap_only_preserve_etf"] = {
+            "MU": direct_weights["MU"] * scale,
+            "SKHY": direct_weights["SKHY"] * scale,
+            "DRAM": dram_weight_pct,
+        }
     scenario_rows: list[dict[str, object]] = []
     for scenario_name, targets in scenarios.items():
         normalized_targets: dict[str, float] = {}
