@@ -257,3 +257,22 @@ def test_run_valuation_writes_report_and_manifest_without_network(
     assert "基准情景估值" in (tmp_path / "outputs" / "valuation_report.md").read_text(encoding="utf-8") or "买入观察线" in (
         tmp_path / "outputs" / "valuation_report.md"
     )
+
+
+def test_currency_mismatch_blocks_dcf_and_pe_values() -> None:
+    fundamentals = {
+        "current_price": 100,
+        "currency": "USD",
+        "financial_currency": "KRW",
+        "currency_mismatch": True,
+        "forward_eps": 5,
+        "free_cash_flow": 100,
+        "diluted_shares": 10,
+        "cash": 100,
+        "debt": 0,
+    }
+    result = value_ticker("ADR", fundamentals, BASE_ASSUMPTIONS)
+    assert result["dcf_base"] is None
+    assert result["pe_base"] is None
+    assert result["overall_confidence"] == "low"
+    assert "未进行货币换算" in result["limitations"]
