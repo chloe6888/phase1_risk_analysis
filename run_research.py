@@ -42,12 +42,12 @@ def fmt_num(value: Any, digits: int = 3) -> str:
 
 def metrics_table(metrics: dict[str, Any]) -> list[str]:
     specs = [
-        ("total_return", "Total return", True),
-        ("annualized_return", "Annualized return", True),
-        ("annualized_volatility", "Annualized volatility", True),
-        ("sharpe_ratio", "Sharpe ratio", False),
-        ("sortino_ratio", "Sortino ratio", False),
-        ("max_drawdown", "Max drawdown", True),
+        ("total_return", "累计收益率", True),
+        ("annualized_return", "年化收益率", True),
+        ("annualized_volatility", "年化波动率", True),
+        ("sharpe_ratio", "夏普比率", False),
+        ("sortino_ratio", "索提诺比率", False),
+        ("max_drawdown", "最大回撤", True),
     ]
     rows = []
     for key, label, is_percent in specs:
@@ -74,112 +74,113 @@ def render_report(
     memory_decisions: pd.DataFrame | None = None,
 ) -> str:
     lines = [
-        "# Personal Quantitative Research Report",
+        "# 个人投资研究报告",
         "",
-        f"- Generated at (UTC): {generated_at}",
-        f"- Benchmark: {benchmark}",
-        f"- Portfolio weights: {weights}",
-        "- Purpose: research and risk assessment; this report is not a buy/sell instruction.",
+        f"- 生成时间（UTC）： {generated_at}",
+        f"- 对比基准： {benchmark}",
+        f"- 组合权重： {weights}",
+        "- 报告用途：投资研究与风险评估，不构成买卖指令。",
         "",
     ]
     if data:
         lines += [
-            "## Data coverage", "",
-            f"- Source: {data.get('source', 'N/A')}",
-            f"- Requested dates: {data.get('requested_start', 'N/A')} to {data.get('requested_end_exclusive', 'N/A')} (end exclusive)",
-            f"- Last date per ticker: {json.dumps(data.get('data_last_dates', {}), ensure_ascii=False)}", "",
+            "## 行情数据覆盖", "",
+            f"- 数据来源： {data.get('source', 'N/A')}",
+            f"- 请求数据区间： {data.get('requested_start', 'N/A')} to {data.get('requested_end_exclusive', 'N/A')}（结束日期不包含在内）",
+            f"- 各标的最后数据日期： {json.dumps(data.get('data_last_dates', {}), ensure_ascii=False)}", "",
         ]
     if holdings_summary:
         lines += [
-            "## Imported holdings and concentration controls", "",
-            f"- Positions: {holdings_summary.get('position_count', 'N/A')}",
-            f"- Latest-price market value: {fmt_num(holdings_summary.get('market_value'), 2)} {holdings_summary.get('currency', '')}",
-            f"- Reconstructed cost basis: {fmt_num(holdings_summary.get('cost_basis'), 2)} {holdings_summary.get('currency', '')}",
-            f"- Unrealized P/L at latest available closes: {fmt_num(holdings_summary.get('unrealized_pnl'), 2)} {holdings_summary.get('currency', '')} ({fmt_pct(float(holdings_summary.get('unrealized_return_pct', 0.0)) / 100.0)})",
-            f"- Largest position: {holdings_summary.get('largest_position_ticker', 'N/A')} ({fmt_pct(float(holdings_summary.get('largest_position_weight_pct', 0.0)) / 100.0)})",
-            f"- Largest risk group: {holdings_summary.get('largest_risk_group', 'N/A')} ({fmt_pct(float(holdings_summary.get('largest_risk_group_weight_pct', 0.0)) / 100.0)})", "",
+            "## 导入持仓与集中度检查", "",
+            f"- 持仓数量： {holdings_summary.get('position_count', 'N/A')}",
+            f"- 最近收盘价估算市值： {fmt_num(holdings_summary.get('market_value'), 2)} {holdings_summary.get('currency', '')}",
+            f"- 按持仓数量重建的成本： {fmt_num(holdings_summary.get('cost_basis'), 2)} {holdings_summary.get('currency', '')}",
+            f"- 按最近收盘价估算的浮动盈亏： {fmt_num(holdings_summary.get('unrealized_pnl'), 2)} {holdings_summary.get('currency', '')} ({fmt_pct(float(holdings_summary.get('unrealized_return_pct', 0.0)) / 100.0)})",
+            f"- 最大单一持仓： {holdings_summary.get('largest_position_ticker', 'N/A')} ({fmt_pct(float(holdings_summary.get('largest_position_weight_pct', 0.0)) / 100.0)})",
+            f"- 最大风险主题： {holdings_summary.get('largest_risk_group', 'N/A')} ({fmt_pct(float(holdings_summary.get('largest_risk_group_weight_pct', 0.0)) / 100.0)})", "",
         ]
         theme_exposures = holdings_summary.get("risk_group_exposures_pct", {})
         subgroup_exposures = holdings_summary.get("subgroup_exposures_pct", {})
         if theme_exposures:
-            lines.append("- Risk theme exposure: " + "; ".join(f"{name}: {float(weight):.1f}%" for name, weight in theme_exposures.items()))
+            lines.append("- 风险主题敞口：" + "; ".join(f"{name}: {float(weight):.1f}%" for name, weight in theme_exposures.items()))
         if subgroup_exposures:
-            lines.append("- Industry exposure: " + "; ".join(f"{name}: {float(weight):.1f}%" for name, weight in subgroup_exposures.items()))
+            lines.append("- 行业分类敞口：" + "; ".join(f"{name}: {float(weight):.1f}%" for name, weight in subgroup_exposures.items()))
         lines.append("")
         if holdings_reconciliation:
             lines.extend([
-                "### Snapshot reconciliation", "",
-                f"- Calculated market value minus broker summary: {fmt_num(holdings_reconciliation.get('market_value_delta'), 2)}",
-                f"- Calculated P/L minus broker summary: {fmt_num(holdings_reconciliation.get('unrealized_pnl_delta'), 2)}",
-                f"- Broker-reported daily P/L (snapshot only): {fmt_num(holdings_reconciliation.get('reported_today_pnl'), 2)}",
-                f"- Reconciled within configured tolerance: {'Yes' if holdings_reconciliation.get('within_tolerance') else 'No — verify shares, price timestamps, hidden positions, and fees'}", "",
+                "### 持仓快照核对", "",
+                f"- 估算市值与券商汇总差额： {fmt_num(holdings_reconciliation.get('market_value_delta'), 2)}",
+                f"- 浮动盈亏估算与券商汇总差额： {fmt_num(holdings_reconciliation.get('unrealized_pnl_delta'), 2)}",
+                f"- 券商截图记录的当日盈亏： {fmt_num(holdings_reconciliation.get('reported_today_pnl'), 2)}",
+                f"- 是否在设定误差范围内对齐： {'Yes' if holdings_reconciliation.get('within_tolerance') else 'No — verify shares, price timestamps, hidden positions, and fees'}", "",
             ])
         if holdings_alerts:
-            lines.extend(["### Concentration review flags", ""])
+            lines.extend(["### 集中度风险提醒", ""])
             for alert in holdings_alerts:
                 lines.append(f"- **{alert.get('level', 'info')}** {alert.get('message', '')}")
             lines.append("")
         else:
-            lines.extend(["- No position/group concentration threshold was breached in the imported holdings snapshot.", ""])
+            lines.extend(["- 导入持仓未触发单一持仓或分组集中度阈值。", ""])
         lines.extend([
-            "Weights are calculated among imported equity/ETF positions only; cash, bonds, other accounts, FX liabilities, and margin financing are not included unless separately imported.",
-            "Latest raw closes are historical valuation references, not live executable quotes. Confirm every share quantity and latest-price date before acting.", "",
+            "持仓比例仅按已导入股票和 ETF 计算；除非单独导入，否则不包含现金、债券、其他账户、外币负债和融资负债。",
+            "最近收盘价仅用于历史估值参考，不代表实时可成交报价。采取行动前，请核实每个标的的持股数量和报价日期。", "",
         ])
     if memory_summary:
         lines += [
-            "## MU / SKHY / DRAM allocation review", "",
-            f"- Current memory sleeve: {fmt_pct(float(memory_summary.get('memory_sleeve_weight_pct', 0.0)) / 100.0)}",
-            f"- Policy limit: {fmt_pct(float(memory_summary.get('max_memory_weight_pct', 0.0)) / 100.0)}",
-            f"- Overall rule: {memory_summary.get('overall_action', 'N/A')}",
-            f"- Reason: {memory_summary.get('overall_reason', 'N/A')}",
-            f"- DRAM look-through holdings assumption date: {memory_summary.get('lookthrough_asof', 'N/A')}",
-            f"- Look-through issuer exposure: " + "; ".join(
+            "## MU / SKHY / DRAM 存储主题分析", "",
+            f"- 当前存储主题占比： {fmt_pct(float(memory_summary.get('memory_sleeve_weight_pct', 0.0)) / 100.0)}",
+            f"- 风险预算上限： {fmt_pct(float(memory_summary.get('max_memory_weight_pct', 0.0)) / 100.0)}",
+            f"- 规则检查结果： { {'REDUCE_MEMORY_SLEEVE': '存储主题仓位超限', 'WITHIN_MEMORY_LIMIT': '存储主题仓位在限制内'}.get(str(memory_summary.get('overall_action', 'N/A')), memory_summary.get('overall_action', 'N/A'))}",
+            f"- 判断依据： {memory_summary.get('overall_reason', 'N/A')}",
+            f"- DRAM 穿透持仓假设日期： {memory_summary.get('lookthrough_asof', 'N/A')}",
+            f"- 发行人穿透敞口：" + "; ".join(
                 f"{ticker}: {float(weight):.1f}%" for ticker, weight in memory_summary.get("lookthrough_issuer_weights_pct", {}).items()
             ),
             "",
-            "This is an allocation guardrail, not a forecast or an order. The default balanced scenario targets 8% MU, 6% SKHY and 5% DRAM of the selected reference portfolio. Update DRAM look-through weights and review company fundamentals before trading.",
+            "本模块用于检查风险预算，不是价格预测或交易指令。默认平衡方案以参考组合计，目标权重为 MU 8%、SKHY 6%、DRAM 5%。执行前应更新 DRAM 穿透持仓并复核公司基本面。",
             "",
         ]
         if memory_decisions is not None and not memory_decisions.empty:
             balanced = memory_decisions[memory_decisions["scenario"] == "balanced"]
             if not balanced.empty:
                 lines += [
-                    "| Balanced scenario | Current shares | Target shares | Change | Action |",
+                    "| 平衡方案 | 当前股数 | 目标股数 | 股数变化 | 建议动作 |",
                     "|---|---:|---:|---:|---|",
                 ]
                 for row in balanced.itertuples(index=False):
                     current = float(row.current_shares)
                     target = float(row.target_shares)
                     change = float(row.share_delta)
+                    action_label = {"REDUCE_TO_TARGET":"按目标仓位减仓复核","HOLD_NO_AUTO_ADD":"暂不自动加仓","HOLD":"维持当前股数","NO_ADD_MEMORY_LIMIT":"存储主题仓位超限，暂不加仓","WAIT_FOR_MEMORY_HEADROOM":"等待仓位回到安全缓冲区","NO_ADD_ISSUER_LOOKTHROUGH_LIMIT":"单一发行人穿透敞口超限","WAIT_FOR_TREND_CONFIRMATION":"等待趋势确认","POSITIVE_TREND_BUT_SIZE_LIMITS_STILL_APPLY":"趋势转正，但仍受仓位限制","STAGED_ADD_REVIEW_ONLY":"满足条件后再评估加仓"}.get(str(row.action), str(row.action))
                     lines.append(
-                        f"| {row.ticker} | {current:g} | {target:g} | {change:+g} | {row.action} |"
+                        f"| {row.ticker} | {current:g} | {target:g} | {change:+g} | {action_label} |"
                     )
                 lines.append("")
         lines += [
             memory_summary.get("denominator_warning", ""),
-            "Trailing price momentum and volatility are descriptive filters only; they do not override a breached position-size limit or replace fundamental valuation.",
+            "近期价格动量和波动率仅是描述性筛选，不会覆盖已触发的仓位上限，也不能替代基本面估值。",
             "",
         ]
     if portfolio:
         lines += [
-            "## Portfolio risk", "",
-            f"- Period: {portfolio.get('start_date', 'N/A')} to {portfolio.get('end_date', 'N/A')}",
-            f"- Return observations: {portfolio.get('observations', 'N/A')}",
-            f"- Risk-free rate source: {portfolio.get('risk_free_rate_source', 'constant annual rate')}", "",
-            "| Metric | Value |", "|---|---:|", *metrics_table(portfolio),
-            f"| Historical one-period VaR | {fmt_pct(portfolio.get('historical_var_one_period'))} |",
-            f"| Historical one-period CVaR | {fmt_pct(portfolio.get('historical_cvar_one_period'))} |", "",
-            "VaR/CVaR are historical one-period estimates, not maximum-loss guarantees.", "",
-            *(["Warning: fewer than 252 common return observations; annualized portfolio risk estimates are based on a short history."] if int(portfolio.get("observations", 0)) < 252 else []),
+            "## 组合风险分析", "",
+            f"- 统计区间： {portfolio.get('start_date', 'N/A')} to {portfolio.get('end_date', 'N/A')}",
+            f"- 有效收益观测： {portfolio.get('observations', 'N/A')}",
+            f"- 无风险收益率来源： {portfolio.get('risk_free_rate_source', 'constant annual rate')}", "",
+            "| 指标 | 数值 |", "|---|---:|", *metrics_table(portfolio),
+            f"| 历史单期 VaR | {fmt_pct(portfolio.get('historical_var_one_period'))} |",
+            f"| 历史单期 CVaR | {fmt_pct(portfolio.get('historical_cvar_one_period'))} |", "",
+            "VaR/CVaR 是基于历史单期收益估算的尾部风险指标，不是最大亏损保证。", "",
+            *(["风险提醒：共同收益观测少于 252 个交易日，年化风险指标基于偏短的历史样本，可能对个别行情阶段较敏感。"] if int(portfolio.get("observations", 0)) < 252 else []),
         ]
     if backtest:
         strategy, base = backtest.get("strategy", {}), backtest.get("benchmark", {})
         lines += [
-            "## Baseline momentum backtest", "",
-            f"- Period: {backtest.get('start_date', 'N/A')} to {backtest.get('end_date', 'N/A')}",
-            f"- Observations: {backtest.get('observations', 'N/A')}",
-            f"- Cost assumptions: {backtest.get('transaction_cost_bps', 'N/A')} bps transaction costs and {backtest.get('slippage_bps', 'N/A')} bps slippage per traded dollar", "",
-            "| Metric | Strategy | Benchmark |", "|---|---:|---:|",
+            "## 基准动量策略历史回测（仅供参考）", "",
+            f"- 统计区间： {backtest.get('start_date', 'N/A')} to {backtest.get('end_date', 'N/A')}",
+            f"- 有效收益观测： {backtest.get('observations', 'N/A')}",
+            f"- 成本假设： {backtest.get('transaction_cost_bps', 'N/A')} 个基点交易成本，滑点 {backtest.get('slippage_bps', 'N/A')} 个基点（按成交金额估算）", "",
+            "| 指标 | 策略 | 对比基准 |", "|---|---:|---:|",
         ]
         for key, label, percentage in [
             ("total_return", "Total return", True), ("annualized_return", "Annualized return", True),
@@ -190,47 +191,47 @@ def render_report(
             right = fmt_pct(base.get(key)) if percentage else fmt_num(base.get(key))
             lines.append(f"| {label} | {left} | {right} |")
         lines += [
-            "", f"- Excess total return vs benchmark: {fmt_pct(backtest.get('excess_total_return'))}",
-            f"- Annualized turnover estimate (drift-aware): {fmt_num(backtest.get('annualized_turnover'), 2)}",
-            f"- Actual rebalance count: {backtest.get('actual_rebalance_count', 'N/A')}",
-            f"- Terminal liquidation cost: {fmt_pct(backtest.get('terminal_liquidation_cost_return'))}", "",
+            "", f"- 相对基准累计收益差： {fmt_pct(backtest.get('excess_total_return'))}",
+            f"- 年化换手率估算（考虑权重漂移）： {fmt_num(backtest.get('annualized_turnover'), 2)}",
+            f"- 实际调仓次数： {backtest.get('actual_rebalance_count', 'N/A')}",
+            f"- 期末清仓成本： {fmt_pct(backtest.get('terminal_liquidation_cost_return'))}", "",
         ]
         comparison = backtest.get("legacy_comparison", {})
         if comparison:
             lines += [
-                "### Drift-aware vs legacy accounting", "",
-                "| Metric | Drift-aware v2 | Legacy target-weight model |",
+                "### 考虑权重漂移的新旧核算口径对照", "",
+                "| 指标 | 考虑权重漂移的新模型 | 旧目标权重模型 |",
                 "|---|---:|---:|",
-                f"| Total return | {fmt_pct(comparison.get('new_total_return'))} | {fmt_pct(comparison.get('legacy_total_return'))} |",
-                f"| Maximum drawdown | {fmt_pct(comparison.get('new_max_drawdown'))} | {fmt_pct(comparison.get('legacy_max_drawdown'))} |",
-                f"| New minus legacy total return | {fmt_pct(comparison.get('total_return_delta_new_minus_legacy'))} | — |",
+                f"| 累计收益率 | {fmt_pct(comparison.get('new_total_return'))} | {fmt_pct(comparison.get('legacy_total_return'))} |",
+                f"| 最大回撤 | {fmt_pct(comparison.get('new_max_drawdown'))} | {fmt_pct(comparison.get('legacy_max_drawdown'))} |",
+                f"| 新模型减旧模型的累计收益差 | {fmt_pct(comparison.get('total_return_delta_new_minus_legacy'))} | — |",
                 "",
-                "The comparison uses the same signals and rebalance dates. It isolates the accounting change; it is not a comparison of separately optimized strategies.",
+                "该对照使用相同信号和调仓日期，仅用于隔离核算方法变化，并非两套分别优化策略的比较。",
                 "",
             ]
         lines += [
-            "The drift-aware model still approximates fills and assumes costs reduce wealth pro rata. It does not model actual share quantities, market impact, taxes, trading halts/price limits, or end-of-period liquidation costs.", "",
+            "考虑权重漂移的模型仍是成交近似，假设成本按比例减少组合资产；它不模拟真实成交股数、市场冲击、税费、停牌/涨跌停或期末清仓成交细节。", "",
         ]
     if validation:
         lines += [
-            "## Parameter sensitivity", "",
-            f"- Requested combinations: {validation.get('requested_combinations', 'N/A')}",
-            f"- Valid combinations: {validation.get('successful_combinations', 'N/A')}",
-            f"- Skipped combinations: {validation.get('skipped_combinations', 'N/A')}", "",
-            "Do not choose a strategy solely on the same test-period results used for tuning; repeatedly testing against a holdout removes its independence.", "",
+            "## 参数敏感性检验", "",
+            f"- 请求测试的参数组合数： {validation.get('requested_combinations', 'N/A')}",
+            f"- 成功完成的参数组合数： {validation.get('successful_combinations', 'N/A')}",
+            f"- 因数据不足等原因跳过的组合数： {validation.get('skipped_combinations', 'N/A')}", "",
+            "不要仅凭用于调参的同一段测试期结果选择策略；反复查看并调整测试期，会破坏样本外检验的独立性。", "",
         ]
     if walk_forward:
         lines += [
-            "## Rolling walk-forward evaluation", "",
-            f"- Training window: {walk_forward.get('train_window_observations', 'N/A')} return observations",
-            f"- Test window: {walk_forward.get('test_window_observations', 'N/A')} return observations",
-            f"- Successful folds: {walk_forward.get('folds_successful', 'N/A')} / {walk_forward.get('folds_total', 'N/A')}",
-            f"- Out-of-sample observations: {walk_forward.get('oos_observations', 'N/A')}", "",
+            "## 滚动样本外验证", "",
+            f"- 训练窗口： {walk_forward.get('train_window_observations', 'N/A')} 个收益观测",
+            f"- 检验窗口： {walk_forward.get('test_window_observations', 'N/A')} 个收益观测",
+            f"- 成功验证轮次： {walk_forward.get('folds_successful', 'N/A')} / {walk_forward.get('folds_total', 'N/A')}",
+            f"- 样本外有效观测： {walk_forward.get('oos_observations', 'N/A')}", "",
         ]
         if "out_of_sample_strategy" in walk_forward:
             strategy = walk_forward["out_of_sample_strategy"]
             base = walk_forward["out_of_sample_benchmark"]
-            lines += ["| Metric | Walk-forward strategy | Benchmark |", "|---|---:|---:|"]
+            lines += ["| 指标 | 滚动样本外策略 | 对比基准 |", "|---|---:|---:|"]
             for key, label, percentage in [
                 ("total_return", "Total return", True), ("annualized_return", "Annualized return", True),
                 ("annualized_volatility", "Annualized volatility", True), ("sharpe_ratio", "Sharpe ratio", False),
@@ -239,15 +240,15 @@ def render_report(
                 left = fmt_pct(strategy.get(key)) if percentage else fmt_num(strategy.get(key))
                 right = fmt_pct(base.get(key)) if percentage else fmt_num(base.get(key))
                 lines.append(f"| {label} | {left} | {right} |")
-            lines += ["", f"- Out-of-sample excess total return: {fmt_pct(walk_forward.get('out_of_sample_excess_total_return'))}", ""]
+            lines += ["", f"- 样本外相对基准累计收益差： {fmt_pct(walk_forward.get('out_of_sample_excess_total_return'))}", ""]
         lines += [
-            "Walk-forward validation reduces dependence on a single split but cannot eliminate multiple-testing bias, survivorship bias, or market-regime changes. Keep a final untouched holdout.", "",
+            "滚动样本外验证可以降低对单次切分的依赖，但不能消除多重试验偏差、幸存者偏差或市场状态变化的影响。建议额外保留一段最终未触碰的留出数据。", "",
         ]
     lines += [
-        "## Output files", "",
-        "The outputs directory also contains underlying CSV/JSON artifacts: risk contributions, drawdowns, rolling risk, daily returns, applied weights, parameter-sweep rows, yearly results, and walk-forward folds.", "",
-        "## Limitations", "",
-        "This report summarizes historical observations and assumptions. It is not a forecast, does not place trades, and does not establish that a strategy has positive expected returns.", "",
+        "## 研究结果文件", "",
+        "outputs 目录还包含风险贡献、回撤、滚动风险、每日收益、应用权重、参数网格、年度表现和 walk-forward 折次等 CSV/JSON 明细文件。", "",
+        "## 方法局限与使用提醒", "",
+        "本报告总结历史观测和研究假设，不构成预测、不执行交易，也不能证明策略具有正的未来期望收益。", "",
     ]
     return "\n".join(lines)
 
