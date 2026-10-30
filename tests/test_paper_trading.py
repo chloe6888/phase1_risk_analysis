@@ -32,8 +32,8 @@ def test_simulation_sells_before_buying_and_accounts_for_friction() -> None:
 def test_buy_orders_scale_down_when_cash_is_insufficient() -> None:
     holdings = pd.DataFrame({"ticker": ["AAA"], "shares": [10]})
     orders, after, summary = app.simulate_rebalance(
-        holdings, {"BBB": 0.95}, {"AAA": 100.0, "BBB": 100.0},
-        cash=0.0, transaction_cost_bps=0, slippage_bps=0,
+        holdings, {"BBB": 1.0}, {"AAA": 100.0, "BBB": 100.0},
+        cash=0.0, transaction_cost_bps=600, slippage_bps=0,
     )
     buy = orders.loc[orders["side"] == "BUY"].iloc[0]
     assert summary["buy_scale_due_to_cash"] < 1
@@ -45,7 +45,7 @@ def test_buy_orders_scale_down_when_cash_is_insufficient() -> None:
 def test_fractional_share_mode_and_no_trade_case() -> None:
     holdings = pd.DataFrame({"ticker": ["AAA"], "shares": [1.5]})
     orders, after, summary = app.simulate_rebalance(
-        holdings, {"AAA": 0.5}, {"AAA": 100.0},
+        holdings, {"AAA": 150.0 / 350.0}, {"AAA": 100.0},
         cash=200.0, fractional_shares=True,
     )
     assert orders.empty
