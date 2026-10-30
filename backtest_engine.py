@@ -199,6 +199,7 @@ def run_backtest(
     risk_free_rate_annual: float = 0.0,
     risk_free_yield: pd.Series | None = None,
     rebalance_freq: str = "daily",
+    include_cash_before_first_investment: bool = False,
 ) -> tuple[dict[str, object], pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Backtest signals with drifted holdings and costs on actual traded notional.
 
@@ -210,6 +211,9 @@ def run_backtest(
 
     The old target-weight-rebalanced approximation is retained in daily/equity
     outputs and summary for an apples-to-apples comparison using the same signals.
+    When include_cash_before_first_investment is True, keep the leading cash
+    observations before the first scheduled rebalance; this aligns cadence
+    comparisons to a common strategy start date.
     """
     if not np.isfinite(transaction_cost_bps) or transaction_cost_bps < 0:
         raise ValueError("transaction_cost_bps must be finite and non-negative.")
@@ -363,9 +367,10 @@ def run_backtest(
     first_active = (applied_weights.sum(axis=1) > 0)
     if not first_active.any():
         raise ValueError("Backtest has no invested observations; check lookback/window parameters.")
-    first_active_date = first_active[first_active].index[0]
-    daily = daily.loc[first_active_date:]
-    applied_weights = applied_weights.reindex(daily.index)
+    if not include_cash_before_first_investment:
+        first_active_date = first_active[first_active].index[0]
+        daily = daily.loc[first_active_date:]
+        applied_weights = applied_weights.reindex(daily.index)
     daily = daily.dropna(subset=["strategy_return", "benchmark_return"])
     if len(daily) < 2:
         raise ValueError("At least two aligned strategy/benchmark return observations are required.")
