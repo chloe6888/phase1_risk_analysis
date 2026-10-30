@@ -99,3 +99,50 @@ def test_detached_worker_publishes_only_complete_run(tmp_path: Path) -> None:
     latest = tasks.active_output_dir(tmp_path)
     assert latest == tmp_path / "outputs" / "runs" / task_id / "artifacts"
     assert (latest / "research_report.md").read_text(encoding="utf-8") == "# complete"
+
+
+def test_valuation_outputs_do_not_replace_latest_research_outputs(tmp_path: Path) -> None:
+    research_dir = tmp_path / "outputs" / "runs" / "research-1" / "artifacts"
+    valuation_dir = tmp_path / "outputs" / "runs" / "valuation-1" / "artifacts"
+    research_dir.mkdir(parents=True)
+    valuation_dir.mkdir(parents=True)
+    _write_json(tmp_path / "outputs" / "runs" / "valuation-1" / "status.json", {
+        "task_id": "valuation-1",
+        "task_type": "valuation",
+        "state": "succeeded",
+    })
+    _write_json(tmp_path / "outputs" / "latest_success.json", {
+        "task_id": "research-1",
+        "artifacts_dir": "outputs/runs/research-1/artifacts",
+    })
+
+    tasks.publish_success(
+        "valuation-1",
+        tmp_path / "outputs" / "runs" / "valuation-1",
+        tmp_path,
+    )
+
+    assert tasks.active_output_dir(tmp_path, task_type="research") == research_dir
+    assert tasks.active_output_dir(tmp_path, task_type="valuation") == valuation_dir
+
+
+def test_start_task_records_task_type_in_status(tmp_path: Path) -> None:
+    import sys
+    import time
+
+    import task_manager as manager
+
+    script = "import time; time.sleep(0.15)"
+    submitted = manager.start_task(
+        [sys.executable, "-c", script],
+        repository_root=tmp_path,
+        task_type="valuation",
+    )
+    task_dir = manager.task_directory(str(submitted["task_id"]), tmp_path)
+    deadline = time.monotonic() + 5
+    current = manager.get_current_task(tmp_path)
+    while current is not None and current.get("state") in {"queued", "running"} and time.monotonic() < deadline:
+        time.sleep(0.05)
+        current = manager.get_current_task(tmp_path)
+    persisted = json.loads((task_dir / "status.json").read_text(encoding="utf-8"))
+    assert persisted["task_type"] == "valuation"
