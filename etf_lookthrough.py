@@ -246,10 +246,17 @@ def import_etf_holdings(
             f"Total parsed holdings weight is {total_weight_pct:.2f}%; expected complete range is {low:.2f}%–{high:.2f}%. "
             "Check whether the source export omits cash or other holdings."
         )
-    unmapped_weight = float(holdings.loc[holdings["issuer"].isna(), "weight_pct"].sum())
+    unmatched_rows = holdings[
+        holdings["issuer"].isna()
+        & holdings["exposure_type"].ne("cash_or_cash_equivalent")
+    ]
+    unmapped_weight = float(unmatched_rows["weight_pct"].sum())
+    cash_equivalent_weight = float(
+        holdings.loc[holdings["exposure_type"].eq("cash_or_cash_equivalent"), "weight_pct"].sum()
+    )
     if unmapped_weight > 0:
         warnings.append(
-            f"{unmapped_weight:.2f}% of holdings weight was not mapped to the configured issuer set; "
+            f"{unmapped_weight:.2f}% of non-cash holdings weight was not mapped to the configured issuer set; "
             "review the full holdings file before relying on issuer exposure totals."
         )
     manifest: dict[str, object] = {
@@ -264,6 +271,7 @@ def import_etf_holdings(
         "total_weight_pct": total_weight_pct,
         "mapped_target_issuer_weight_pct": float(issuer_rows["weight_pct"].sum()),
         "unmapped_weight_pct": unmapped_weight,
+        "cash_or_cash_equivalent_weight_pct": cash_equivalent_weight,
         "weights_were_decimal": use_decimal,
         "complete_weight_range_pct": [low, high],
         "weight_total_in_range": bool(complete),
