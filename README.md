@@ -41,6 +41,7 @@
     ├── backtest_engine.py
     ├── strategy_validation.py
     ├── strategy_research.py
+    ├── portfolio_optimizer.py
     ├── walk_forward_validation.py
     ├── run_research.py
     ├── dashboard.py
@@ -56,6 +57,7 @@
     │   ├── test_backtest_engine.py
     │   ├── test_strategy_validation.py
     │   ├── test_strategy_research.py
+    │   ├── test_portfolio_optimizer.py
     │   ├── test_walk_forward_validation.py
     │   ├── test_run_research.py
     │   ├── test_dashboard.py
@@ -288,6 +290,38 @@ python strategy_research.py \
 | `outputs/strategy_research_report.md` | 人类可读的多策略研究报告 |
 
 **审计边界：** 候选胜出者只按训练期 Sharpe 选择，测试期数据不参与选优。DSR 是近似统计诊断，使用候选数量近似试验次数并假设试验独立；策略之间高度相关时，修正结果并非严格显著性保证。单次留出测试也无法消除反复查看测试结果造成的窥探偏差，仍应保留从未参与调参的最终区间，并结合滚动 Walk-forward 结果。以上策略均为价格数据基线，不包含基本面、行业因子和真实订单执行。
+
+## 约束组合优化
+
+新增 `portfolio_optimizer.py`，使用共同完整的日收益样本估计年化协方差矩阵，并在以下约束下求解长期多头配置：
+
+- 固定风险资产预算（未投入的比例保留为现金）；
+- 单一资产最大权重；
+- 按 ticker 分配的互斥行业/主题分组上限；
+- 不允许做空，且会在约束不可行时明确报错。
+
+默认目标是历史最小方差；也可以选择均值—方差目标，但其预期收益来自历史算术平均值，噪声较大，必须谨慎解释。
+
+基础运行示例：
+
+```bash
+python portfolio_optimizer.py \
+  --risky-budget 0.95 \
+  --asset-max-weight 0.35 \
+  --objective minimum_variance
+```
+
+可以通过 JSON 文件指定更细的约束：
+
+```json
+{"MU": 0.15, "SKHY": 0.10, "DRAM": 0.20}
+```
+
+以上内容可保存为 `asset_caps.json`，对应 ticker 最大权重；另外两个文件分别采用 `{"MU":"memory","SKHY":"memory","DRAM":"memory","GOOGL":"technology"}` 的 ticker 分组格式，以及 `{"memory":0.25,"technology":0.35}` 的分组最大权重格式。运行时通过 `--asset-caps-json`、`--groups-json` 和 `--group-caps-json` 指定。
+
+输出包括 `portfolio_optimized_weights.csv`、`portfolio_optimization_summary.json` 和 `portfolio_optimization_report.md`。报告同时比较约束下的优化组合与约束下等权组合，并输出资产风险贡献。
+
+**使用边界：** 该优化器只依据历史协方差（均值—方差模式还会使用历史平均收益）求解，不预测未来收益。历史最小方差不保证未来风险更低；分组必须互斥，每只资产只能属于一个组。当前不考虑交易成本、税费、流动性、最小交易单位和真实订单执行，也不会下单。
 
 ## 一键运行完整研究流程
 
