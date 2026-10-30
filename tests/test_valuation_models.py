@@ -123,6 +123,19 @@ def test_yahoo_adapter_uses_info_fields_and_historical_close() -> None:
             "marketCap": 100_000,
             "forwardEps": 3.5,
             "freeCashflow": 500,
+            "totalRevenue": 2000,
+            "grossProfits": 1000,
+            "operatingIncome": 400,
+            "netIncomeToCommon": 300,
+            "ebitda": 500,
+            "revenueGrowth": 0.12,
+            "grossMargins": 0.50,
+            "operatingMargins": 0.20,
+            "profitMargins": 0.15,
+            "returnOnEquity": 0.25,
+            "returnOnAssets": 0.12,
+            "trailingPE": 25,
+            "forwardPE": 20,
             "mostRecentQuarter": 1793232000,
         }
 
@@ -142,6 +155,13 @@ def test_yahoo_adapter_uses_info_fields_and_historical_close() -> None:
     assert result["diluted_shares"] == 1000
     assert result["cash"] == 200
     assert result["debt"] == 50
+    assert result["revenue"] == 2000
+    assert result["gross_profit"] == 1000
+    assert result["operating_income"] == 400
+    assert result["net_income"] == 300
+    assert result["revenue_growth_yoy"] == 0.12
+    assert result["gross_margin"] == 0.50
+    assert result["forward_pe"] == 20
 
 
 def test_get_snapshot_reuses_fresh_cache_and_marks_stale_fallback(tmp_path: Path) -> None:
