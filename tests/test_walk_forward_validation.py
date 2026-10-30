@@ -28,7 +28,7 @@ def test_walk_forward_uses_non_overlapping_forward_test_windows() -> None:
     prices = synthetic_prices()
     folds, oos, summary = app.run_walk_forward(
         prices, benchmark="SPY", lookbacks=[20, 30], skip_recents=[3], top_ns=[1, 2],
-        train_window=60, test_window=25, selection_metric="sharpe_ratio",
+        rebalance_freqs=["daily"], train_window=60, test_window=25, selection_metric="sharpe_ratio",
     )
     assert len(folds) >= 2
     assert (folds["status"] == "OK").all()
@@ -78,7 +78,7 @@ def test_cli_writes_walk_forward_outputs(tmp_path) -> None:
     result = subprocess.run(
         [sys.executable, str(Path(__file__).resolve().parents[1] / "walk_forward_validation.py"),
          "--prices", str(path), "--benchmark", "SPY", "--lookbacks", "20,30",
-         "--skip-recents", "3", "--top-ns", "1,2", "--train-window", "60",
+         "--skip-recents", "3", "--top-ns", "1,2", "--rebalance-freqs", "daily", "--train-window", "60",
          "--test-window", "20", "--selection-metric", "sharpe_ratio", "--output-dir", str(output_dir)],
         check=True, capture_output=True, text=True,
     )
@@ -89,3 +89,17 @@ def test_cli_writes_walk_forward_outputs(tmp_path) -> None:
         assert (output_dir / filename).exists()
         assert (output_dir / filename).stat().st_size > 0
     assert '"folds_successful"' in result.stdout
+
+
+def test_walk_forward_selects_rebalance_frequency_inside_training_only() -> None:
+    prices = synthetic_prices(260)
+    folds, oos, summary = app.run_walk_forward(
+        prices, benchmark="SPY", lookbacks=[20], skip_recents=[3], top_ns=[1],
+        rebalance_freqs=["daily", "weekly", "monthly"],
+        train_window=80, test_window=25,
+    )
+    assert summary["requested_combinations"] == 3
+    assert set(folds.loc[folds["status"] == "OK", "selected_rebalance_freq"]).issubset(
+        {"daily", "weekly", "monthly"}
+    )
+    assert "risk_free_return" in oos.columns
