@@ -46,12 +46,12 @@ def test_render_report_combines_risk_backtest_and_validation() -> None:
                 "annualized_volatility": 0.16, "sharpe_ratio": 0.45, "max_drawdown": -0.13},
         },
     )
-    assert "Portfolio risk" in report
-    assert "Baseline momentum backtest" in report
-    assert "Parameter sensitivity" in report
-    assert "Rolling walk-forward evaluation" in report
-    assert "Historical one-period VaR" in report
-    assert "does not place trades" in report
+    assert "组合风险分析" in report
+    assert "基准动量策略历史回测（仅供参考）" in report
+    assert "参数敏感性检验" in report
+    assert "滚动样本外验证" in report
+    assert "历史单期 VaR" in report
+    assert "不执行交易" in report
     assert "25.00%" in report
 
 
@@ -60,9 +60,9 @@ def test_write_report_handles_missing_optional_outputs(tmp_path: Path) -> None:
     report_path = app.write_report(tmp_path, weights="AAA=1", benchmark="SPY")
     text = report_path.read_text(encoding="utf-8")
     assert report_path.exists()
-    assert "Data coverage" in text
-    assert "Portfolio risk" not in text
-    assert "Rolling walk-forward evaluation" not in text
+    assert "行情数据覆盖" in text
+    assert "组合风险分析" not in text
+    assert "滚动样本外验证" not in text
 
 
 def test_write_report_reads_machine_readable_outputs(tmp_path: Path) -> None:
@@ -78,7 +78,7 @@ def test_write_report_reads_machine_readable_outputs(tmp_path: Path) -> None:
     rendered = report_path.read_text(encoding="utf-8")
     assert "SPY=1" in rendered
     assert "10.00%" in rendered
-    assert "Historical one-period CVaR" in rendered
+    assert "历史单期 CVaR" in rendered
 
 
 def test_report_shows_imported_holdings_reconciliation_and_alerts() -> None:
@@ -112,8 +112,8 @@ def test_report_shows_imported_holdings_reconciliation_and_alerts() -> None:
             "within_tolerance": False,
         },
     )
-    assert "Imported holdings and concentration controls" in report
-    assert "Snapshot reconciliation" in report
+    assert "导入持仓与集中度检查" in report
+    assert "持仓快照核对" in report
     assert "verify shares" in report
     assert "semiconductor_related" in report
     assert "cash, bonds" in report
@@ -146,8 +146,8 @@ def test_report_renders_memory_allocation_rule_and_balanced_share_targets() -> N
         },
         memory_decisions=decisions,
     )
-    assert "MU / SKHY / DRAM allocation review" in report
-    assert "REDUCE_MEMORY_SLEEVE" in report
+    assert "MU / SKHY / DRAM 存储主题分析" in report
+    assert "存储主题仓位超限" in report
     assert "SKHY" in report
-    assert "Target shares" in report
+    assert "目标股数" in report
     assert "Imported listed positions only" in report
