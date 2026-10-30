@@ -75,7 +75,7 @@ def test_reject_invalid_prices_and_insufficient_history() -> None:
     prices.iloc[0, 0] = 0
     with pytest.raises(ValueError, match="positive"):
         app.calculate_portfolio_risk(prices, {"AAA": 1.0})
-    with pytest.raises(ValueError, match="three common"):
+    with pytest.raises(ValueError, match="two common return observations"):
         app.calculate_portfolio_risk(sample_prices().iloc[:2], {"AAA": 1.0})
 
 
