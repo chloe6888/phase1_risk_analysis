@@ -30,7 +30,9 @@
           "fair_pe": 24,
           "cost_of_equity": 0.085
         }
-      }
+      },
+      "per_share_basis_verified": true,
+      "per_share_basis_note": "美国市场普通股上市证券；EPS 与股数按该上市证券单位使用，仍需与公司/供应商披露交叉核验。"
     },
     "NVDA": {
       "cyclical": false,
@@ -55,7 +57,9 @@
           "fair_pe": 28,
           "cost_of_equity": 0.095
         }
-      }
+      },
+      "per_share_basis_verified": true,
+      "per_share_basis_note": "美国市场普通股上市证券；EPS 与股数按该上市证券单位使用，仍需与公司/供应商披露交叉核验。"
     },
     "MU": {
       "cyclical": true,
@@ -80,12 +84,14 @@
           "fair_pe": 18,
           "cost_of_equity": 0.1
         }
-      }
+      },
+      "per_share_basis_verified": true,
+      "per_share_basis_note": "美国市场普通股上市证券；EPS 与股数按该上市证券单位使用，仍需与公司/供应商披露交叉核验。"
     },
     "SKHY": {
       "cyclical": true,
       "assumption_source": "周期股初始研究假设（人工设定，非市场一致预期）",
-      "notes": "需先核验Yahoo Finance是否覆盖该交易代码及其证券类型；SK hynix为强周期存储公司，估值应采用跨周期正常化盈利/FCF。",
+      "notes": "SK hynix 为强周期存储公司，并以 NASDAQ:SKHY ADR 交易；1 ADS 对应 10 股韩国普通股。公司财务报表以 KRW 为主，报价以 USD 计。系统会暂停未换汇的 FCF DCF；在核验 Yahoo EPS 与 sharesOutstanding 的 ADR 单位口径前，不计算每 ADS 的 DCF/PE。若要启用 DCF，需补充经跨周期研究且已换算为 USD 的 normalized_fcf，并确认 ADS 股数口径。",
       "scenarios": {
         "bear": {
           "fcf_growth": -0.05,
@@ -105,7 +111,10 @@
           "fair_pe": 18,
           "cost_of_equity": 0.1
         }
-      }
+      },
+      "per_share_basis_verified": false,
+      "per_share_basis_note": "SK hynix NASDAQ ADR：1 ADS 对应 10 股韩国普通股。Yahoo 的 forward EPS 和 sharesOutstanding 是否都以 1 ADS 为单位尚未完成核验；在确认前禁止计算每 ADS 的 DCF/PE。核验后再将 per_share_basis_verified 设为 true。",
+      "adr_underlying_shares_per_ads": 10
     }
   }
 }
