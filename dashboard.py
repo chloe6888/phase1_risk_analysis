@@ -25,6 +25,27 @@ OUTPUT_DIR = ROOT / "outputs"
 PIPELINE_SCRIPT = ROOT / "run_research.py"
 PRIVATE_HOLDINGS_PATH = ROOT / "data" / "private" / "holdings_snapshot.csv"
 MIN_RISK_HISTORY_OBSERVATIONS = 252
+SIMPLE_MODE_DEFAULTS = {
+    "lookbacks": "63,126,252",
+    "skip_recents": "5,21",
+    "top_ns": "1,2,3",
+    "train_window": 252,
+    "test_window": 63,
+    "transaction_cost_bps": 5.0,
+    "slippage_bps": 5.0,
+    "risk_free_rate": 0.0,
+}
+
+RISK_GROUP_LABELS = {
+    "semiconductor": "半导体",
+    "semiconductor_related": "半导体相关",
+    "technology": "科技",
+    "software": "软件",
+    "consumer": "消费",
+    "energy": "能源",
+    "financials": "金融",
+    "unclassified": "未分类",
+}
 
 RISK_METRIC_EXPLANATIONS = {
     "年化波动率": "把日收益率的起伏折算成年化标准差。例：年化波动率 20% 表示历史收益波动幅度较大，不表示一年最多只会亏 20%。",
@@ -340,6 +361,12 @@ def _walk_forward_overview(walk: dict[str, Any] | None) -> dict[str, Any] | None
     }
 
 
+def _risk_group_label(value: Any) -> str:
+    """Translate common group keys while preserving user-defined names."""
+    label = str(value or "unclassified")
+    return RISK_GROUP_LABELS.get(label.lower(), label.replace("_", " "))
+
+
 def _signed_delta_text(value: Any, *, unit: str = "个百分点") -> str | None:
     """Render a signed comparison with a direction cue independent of color."""
     number = _float_or_none(value)
@@ -408,7 +435,10 @@ def _portfolio_risk_plain_language(
             if asset is None:
                 asset = position
             contribution = float(values.loc[position])
-            summary += f"风险贡献较大的持仓是 {asset}，约占组合波动贡献的 {contribution * 100:.1f}%。"
+            if contribution >= 0:
+                summary += f"风险贡献较大的持仓是 {asset}，约占组合波动贡献的 {contribution * 100:.1f}%。"
+            else:
+                summary += f"{asset} 对组合波动有对冲作用，净风险贡献约为 {contribution * 100:.1f}%。"
     return summary
 
 
@@ -425,7 +455,7 @@ def _holdings_plain_language(summary: dict[str, Any] | None, alerts: list[dict[s
     if ticker and ticker_weight is not None:
         parts.append(f"最大单一持仓是 {ticker}，约占导入证券持仓的 {float(ticker_weight):.1f}%")
     if group and group_weight is not None:
-        parts.append(f"占比最高的风险主题是 {group}，约占 {float(group_weight):.1f}%")
+        parts.append(f"占比最高的风险主题是 {_risk_group_label(group)}，约占 {float(group_weight):.1f}%")
     if count:
         parts.append(f"目前触发 {count} 项集中度提醒")
     else:
@@ -827,9 +857,14 @@ def main() -> None:
                 help="这一天及之后的数据用于单次样本外评估。应根据本地行情历史长度选择，不能反复用检验结果调参。",
             )
             # Simple mode keeps a stable, documented default parameter set.
-            lookbacks, skips, top_ns = "63,126,252", "5,21", "1,2,3"
-            train_window, test_window = 252, 63
-            cost_bps, slippage_bps, risk_free_rate = 5.0, 5.0, 0.0
+            lookbacks = SIMPLE_MODE_DEFAULTS["lookbacks"]
+            skips = SIMPLE_MODE_DEFAULTS["skip_recents"]
+            top_ns = SIMPLE_MODE_DEFAULTS["top_ns"]
+            train_window = SIMPLE_MODE_DEFAULTS["train_window"]
+            test_window = SIMPLE_MODE_DEFAULTS["test_window"]
+            cost_bps = SIMPLE_MODE_DEFAULTS["transaction_cost_bps"]
+            slippage_bps = SIMPLE_MODE_DEFAULTS["slippage_bps"]
+            risk_free_rate = SIMPLE_MODE_DEFAULTS["risk_free_rate"]
             refresh, allow_stale, skip_walk_forward = False, False, False
             if research_mode == "专业模式":
                 with st.expander("高级研究设置", expanded=True):
@@ -1053,7 +1088,7 @@ def main() -> None:
                 help="这是完整历史区间上的基准回测，并非独立样本外结果。差值为策略相对基准的累计收益百分点。",
             )
             right.metric("对比基准累计收益", _pct(benchmark_result.get("total_return")))
-            extra.metric("相对基准差值", _pct(backtest.get("excess_total_return")), help="策略累计收益减去基准累计收益；不是未来超额收益预测。")
+            extra.metric("历史有效观测", f"{backtest.get('observations', '暂无')} 个交易日", help="这段历史回测中策略与基准可比较的收益观测数量。")
         if not portfolio and imported_positions is None and not backtest:
             st.markdown("#### 第一次使用")
             st.write("1. 从券商导出持仓 CSV，或在上方填写组合权重。")
