@@ -82,6 +82,14 @@ def test_streamlit_dashboard_initializes_without_existing_outputs() -> None:
         "尚无滚动样本外验证结果" in element.value
         for element in page.info
     )
+    mode_switch = next(widget for widget in page.radio if widget.label == "研究设置模式")
+    assert mode_switch.value == "简易模式"
+    mode_switch.set_value("专业模式")
+    page.run()
+    assert any(
+        "动量观察区间（交易日）" == widget.label
+        for widget in page.text_input
+    )
 
 
 def test_make_pipeline_command_uses_imported_holdings_instead_of_manual_weights() -> None:
