@@ -37,7 +37,7 @@ def test_parameter_sweep_separates_train_and_test_periods() -> None:
     split = prices.index[300]
     grid, yearly = app.run_parameter_sweep(
         prices, test_start=split, benchmark="SPY",
-        lookbacks=[30, 60], skip_recents=[5], top_ns=[1, 2],
+        lookbacks=[30, 60], skip_recents=[5], top_ns=[1, 2], rebalance_freqs=["daily"],
         transaction_cost_bps=5, slippage_bps=5,
     )
     assert len(grid) == 4
@@ -80,7 +80,7 @@ def test_cli_writes_sweep_and_yearly_outputs(tmp_path) -> None:
         [sys.executable, str(Path(__file__).resolve().parents[1] / "strategy_validation.py"),
          "--prices", str(path), "--benchmark", "SPY", "--test-start", str(prices.index[180].date()),
          "--lookbacks", "30,45", "--skip-recents", "5", "--top-ns", "1,2",
-         "--output-dir", str(output_dir)],
+         "--rebalance-freqs", "daily", "--output-dir", str(output_dir)],
         check=True, capture_output=True, text=True,
     )
     metadata = json.loads((output_dir / "strategy_validation_metadata.json").read_text())
@@ -98,3 +98,19 @@ def test_parse_int_list_rejects_duplicates_and_nonpositive() -> None:
         app.parse_int_list("63,63")
     with pytest.raises(Exception):
         app.parse_int_list("0,126")
+
+
+def test_parameter_sweep_includes_rebalance_frequency_as_grid_dimension() -> None:
+    prices = synthetic_prices()
+    grid, _ = app.run_parameter_sweep(
+        prices, test_start=prices.index[300], benchmark="SPY",
+        lookbacks=[30], skip_recents=[5], top_ns=[1],
+        rebalance_freqs=["daily", "weekly", "monthly"],
+    )
+    assert len(grid) == 3
+    assert set(grid["rebalance_freq"]) == {"daily", "weekly", "monthly"}
+    with pytest.raises(ValueError, match="rebalance_freqs"):
+        app.run_parameter_sweep(
+            prices, test_start=prices.index[300], benchmark="SPY",
+            lookbacks=[30], skip_recents=[5], top_ns=[1], rebalance_freqs=["quarterly"],
+        )
