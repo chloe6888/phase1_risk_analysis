@@ -220,23 +220,41 @@ def analyze_memory_positions(
     if "balanced" not in scenarios:
         raise ValueError("At least a 'balanced' target scenario is required.")
     # Minimum-trim option: preserve the current DRAM ETF quantity and scale
-    # only the two direct stock positions enough to bring the memory sleeve
-    # under the configured cap. This avoids forcing a DRAM sale just because
-    # the combined sleeve is overweight.
+    # only direct MU/SKHY holdings. The scale must satisfy both the combined
+    # memory-sleeve cap and the look-through single-issuer caps. Whole-share
+    # quantities are rounded down so the resulting scenario cannot cross a
+    # hard limit merely because of rounding.
     if "cap_only_preserve_etf" not in scenarios:
-        dram_weight_pct = float(value_map["DRAM"]) / denominator * 100.0
-        direct_weights = {
-            ticker: float(value_map[ticker]) / denominator * 100.0
-            for ticker in ("MU", "SKHY")
-        }
-        direct_total_weight = sum(direct_weights.values())
-        direct_budget_pct = max(0.0, max_memory_weight_pct - dram_weight_pct)
-        scale = min(1.0, direct_budget_pct / direct_total_weight) if direct_total_weight > 0 else 1.0
-        scenarios["cap_only_preserve_etf"] = {
-            "MU": direct_weights["MU"] * scale,
-            "SKHY": direct_weights["SKHY"] * scale,
-            "DRAM": dram_weight_pct,
-        }
+        dram_value = float(value_map["DRAM"])
+        dram_weight_pct = dram_value / denominator * 100.0
+        direct_values = {ticker: float(value_map[ticker]) for ticker in ("MU", "SKHY")}
+        direct_total_value = sum(direct_values.values())
+        memory_direct_budget = max(0.0, denominator * max_memory_weight_pct / 100.0 - dram_value)
+        scale_candidates = [1.0]
+        if direct_total_value > 0:
+            scale_candidates.append(memory_direct_budget / direct_total_value)
+        for ticker in ("MU", "SKHY"):
+            issuer_direct_budget = max(
+                0.0,
+                denominator * max_issuer_exposure_pct / 100.0
+                - dram_value * float(lookthrough[ticker]),
+            )
+            if direct_values[ticker] > 0:
+                scale_candidates.append(issuer_direct_budget / direct_values[ticker])
+        scale = min(max(value, 0.0) for value in scale_candidates)
+        cap_targets: dict[str, float] = {}
+        for ticker in ("MU", "SKHY"):
+            raw_target_shares = float(shares_map[ticker]) * scale
+            target_quantity = (
+                round(raw_target_shares, 4)
+                if fractional_shares
+                else int(math.floor(raw_target_shares + 1e-9))
+            )
+            cap_targets[ticker] = (
+                float(target_quantity) * float(price_map[ticker]) / denominator * 100.0
+            )
+        cap_targets["DRAM"] = dram_weight_pct
+        scenarios["cap_only_preserve_etf"] = cap_targets
     scenario_rows: list[dict[str, object]] = []
     for scenario_name, targets in scenarios.items():
         normalized_targets: dict[str, float] = {}
