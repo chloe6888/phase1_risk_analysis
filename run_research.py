@@ -100,7 +100,7 @@ def render_report(
         lines += [
             "## 行情数据覆盖", "",
             f"- 数据来源： {data.get('source', 'N/A')}",
-            f"- 请求数据区间： {data.get('requested_start', 'N/A')} to {data.get('requested_end_exclusive', 'N/A')}（结束日期不包含在内）",
+            f"- 请求数据区间： {data.get('requested_start', '暂无')} 至 {data.get('requested_end_exclusive', '暂无')}（结束日期不包含在内）",
             f"- 各标的最后数据日期： {json.dumps(data.get('data_last_dates', {}), ensure_ascii=False)}", "",
         ]
     if holdings_summary:
