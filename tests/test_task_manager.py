@@ -146,3 +146,40 @@ def test_start_task_records_task_type_in_status(tmp_path: Path) -> None:
         current = manager.get_current_task(tmp_path)
     persisted = json.loads((task_dir / "status.json").read_text(encoding="utf-8"))
     assert persisted["task_type"] == "valuation"
+
+
+def test_valuation_worker_publishes_valuation_artifacts_only(tmp_path: Path) -> None:
+    import shutil
+    import sys
+    import time
+
+    project = Path(tasks.__file__).resolve().parent
+    shutil.copy2(project / "task_manager.py", tmp_path / "task_manager.py")
+    shutil.copy2(project / "task_worker.py", tmp_path / "task_worker.py")
+
+    writer = (
+        "import os; from pathlib import Path; "
+        "p=Path(os.environ['PHASE1_OUTPUT_DIR']); p.mkdir(parents=True, exist_ok=True); "
+        "(p/'valuation_report.md').write_text('# valuation', encoding='utf-8'); "
+        "(p/'valuation_run_manifest.json').write_text('{}', encoding='utf-8')"
+    )
+    submitted = tasks.start_task(
+        [sys.executable, "-c", writer],
+        repository_root=tmp_path,
+        task_type="valuation",
+    )
+    task_id = str(submitted["task_id"])
+
+    deadline = time.monotonic() + 10
+    current = tasks.get_current_task(tmp_path)
+    while current is not None and current.get("state") in {"queued", "running"} and time.monotonic() < deadline:
+        time.sleep(0.05)
+        current = tasks.get_current_task(tmp_path)
+
+    assert current is not None
+    assert current["state"] == "succeeded"
+    assert current["task_type"] == "valuation"
+    assert tasks.active_output_dir(tmp_path, task_type="valuation") == (
+        tmp_path / "outputs" / "runs" / task_id / "artifacts"
+    )
+    assert tasks.active_output_dir(tmp_path, task_type="research") == tmp_path / "outputs"
