@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -11,6 +10,9 @@ from typing import Any
 
 import pandas as pd
 from holdings_manager import load_holdings, summarize_holdings, risk_guardrail_alerts
+from task_manager import (
+    TaskAlreadyRunning, active_output_dir, get_current_task, get_task_log, start_task,
+)
 
 try:
     import streamlit as st
@@ -47,9 +49,9 @@ def read_csv(path: str | Path, *, date_index: bool = False) -> pd.DataFrame | No
     return frame
 
 
-def output_status(output_dir: str | Path = OUTPUT_DIR) -> dict[str, bool]:
-    """Return availability of key research artifacts."""
-    directory = Path(output_dir)
+def output_status(output_dir: str | Path | None = None) -> dict[str, bool]:
+    """Return availability of key research artifacts in the last successful run."""
+    directory = Path(output_dir) if output_dir is not None else active_output_dir(ROOT)
     names = [
         "analysis_metadata.json",
         "portfolio_risk_summary.json",
@@ -136,6 +138,41 @@ def _float_or_none(value: Any) -> float | None:
     return float(value)
 
 
+def render_task_monitor() -> None:
+    """Render a lightweight, periodically refreshed status panel."""
+    if st is None:
+        return
+
+    @st.fragment(run_every="3s")
+    def _monitor() -> None:
+        task = get_current_task(ROOT)
+        if task is None:
+            st.info("尚未运行研究任务。请从左侧导入持仓并启动分析。")
+            return
+
+        state = str(task.get("state", "unknown"))
+        task_id = str(task.get("task_id", "unknown"))
+        step = str(task.get("current_step") or "后台准备中")
+        message = str(task.get("message") or "")
+        if state in {"queued", "running"}:
+            st.info(f"研究任务运行中 · {step}。页面可以继续浏览，已有成功报告不会被覆盖。")
+        elif state == "succeeded":
+            st.success(f"最近一次研究任务已成功 · {task.get('finished_at', '')}")
+            loaded = st.session_state.get("loaded_task_id")
+            if loaded != task_id:
+                st.session_state["loaded_task_id"] = task_id
+                st.rerun()
+        elif state == "failed":
+            st.error(f"研究任务失败 · {message}")
+        else:
+            st.caption(f"最近任务状态：{state} · {message}")
+
+        with st.expander("查看本次运行日志", expanded=state == "failed"):
+            st.code(get_task_log(task_id, ROOT), language="text")
+
+    _monitor()
+
+
 def main() -> None:
     if st is None:
         raise RuntimeError(
@@ -144,37 +181,56 @@ def main() -> None:
         )
     st.set_page_config(page_title="个人量化研究系统", page_icon="📈", layout="wide")
     st.title("个人量化研究系统")
-    st.caption("本地研究面板 · 历史风险与策略验证 · 不执行真实交易")
+    st.caption("个人投资研究工作台 · 持仓风险、策略验证与历史研究 · 不连接券商、不执行真实交易")
 
-    status = output_status()
+    output_dir = active_output_dir(ROOT)
+    status = output_status(output_dir)
+    st.markdown("### 研究任务")
+    render_task_monitor()
     with st.sidebar:
         st.header("运行研究")
         st.caption("提交后会实际运行数据更新和量化分析脚本。首次下载行情需要网络。持仓文件保存在本机 data/private/，该目录已加入 Git 忽略规则。")
         with st.form("research_run_form"):
-            uploaded_holdings = st.file_uploader("导入当前持仓 CSV（ticker, shares, average_cost, snapshot_price）", type=["csv"])
-            use_imported_holdings = st.checkbox(
-                "使用导入持仓自动计算组合权重",
-                value=PRIVATE_HOLDINGS_PATH.is_file(),
-                help="导入持仓用于组合权重和风险分析；股数、成本和价格仍需与券商端核对。",
+            st.markdown("**第一步：选择你的持仓数据**")
+            uploaded_holdings = st.file_uploader(
+                "上传券商持仓 CSV",
+                type=["csv"],
+                help="必需列：ticker、shares、average_cost、snapshot_price。",
             )
-            weights = st.text_input("手工组合目标权重（不使用导入文件时填写）", value="", placeholder="GOOG=0.60,SPY=0.40",
-                                    help="可使用 ticker=weight,... 格式。不要提交账户号码或其他秘密。")
-            benchmark = st.text_input("基准标的", value="SPY").strip().upper() or "SPY"
-            test_start = st.date_input("单次样本外起始日期", value=date(2023, 1, 1))
-            lookbacks = st.text_input("参数验证：回看窗口", value="63,126,252")
-            skips = st.text_input("参数验证：跳过近期窗口", value="5,21")
-            top_ns = st.text_input("参数验证：持仓数量", value="1,2,3")
-            train_window = st.number_input("Walk-forward 训练窗口（交易日）", min_value=20, max_value=2000, value=252)
-            test_window = st.number_input("Walk-forward 测试窗口（交易日）", min_value=10, max_value=500, value=63)
-            cost_bps = st.number_input("交易成本（基点）", min_value=0.0, max_value=1000.0, value=5.0, step=1.0)
-            slippage_bps = st.number_input("滑点（基点）", min_value=0.0, max_value=1000.0, value=5.0, step=1.0)
-            risk_free_rate = st.number_input("年化无风险利率（小数）", min_value=-0.5, max_value=1.0, value=0.0, step=0.005, format="%.3f")
-            refresh = st.checkbox("强制刷新所有行情", value=False)
-            allow_stale = st.checkbox("刷新失败时允许使用旧缓存", value=False,
-                                      help="仅在明确接受陈旧数据风险时勾选；报告会记录数据日期。")
-            skip_walk_forward = st.checkbox("跳过 Walk-forward", value=False,
-                                            help="仅当历史数据长度不足时考虑；报告不包含滚动样本外验证。")
-            submitted = st.form_submit_button("运行完整研究流程", type="primary", use_container_width=True)
+            use_imported_holdings = st.checkbox(
+                "根据导入持仓自动计算组合权重",
+                value=PRIVATE_HOLDINGS_PATH.is_file(),
+                help="股数和成本请与券商记录核对；现金和融资负债需另行计入。",
+            )
+            weights = st.text_input(
+                "或者输入研究组合权重",
+                value="",
+                placeholder="GOOG=0.60,SPY=0.40",
+                help="仅在不使用持仓 CSV 时填写，权重使用小数。",
+            )
+            with st.expander("高级研究设置（首次使用可保持默认）", expanded=False):
+                benchmark = st.text_input("对比基准", value="SPY").strip().upper() or "SPY"
+                test_start = st.date_input("样本外测试起始日期", value=date(2023, 1, 1))
+                lookbacks = st.text_input("动量回看窗口（交易日）", value="63,126,252")
+                skips = st.text_input("跳过最近窗口（交易日）", value="5,21")
+                top_ns = st.text_input("策略持有资产数量", value="1,2,3")
+                train_window = st.number_input("Walk-forward 训练窗口（交易日）", min_value=20, max_value=2000, value=252)
+                test_window = st.number_input("Walk-forward 测试窗口（交易日）", min_value=10, max_value=500, value=63)
+                cost_bps = st.number_input("交易成本（基点）", min_value=0.0, max_value=1000.0, value=5.0, step=1.0)
+                slippage_bps = st.number_input("滑点（基点）", min_value=0.0, max_value=1000.0, value=5.0, step=1.0)
+                risk_free_rate = st.number_input("年化无风险利率（小数）", min_value=-0.5, max_value=1.0, value=0.0, step=0.005, format="%.3f")
+                refresh = st.checkbox("强制重新下载全部行情", value=False)
+                allow_stale = st.checkbox(
+                    "刷新失败时允许使用旧行情缓存",
+                    value=False,
+                    help="仅在明确接受数据过期风险时勾选。",
+                )
+                skip_walk_forward = st.checkbox(
+                    "跳过 Walk-forward 验证",
+                    value=False,
+                    help="仅当历史长度不足时使用。",
+                )
+            submitted = st.form_submit_button("启动研究分析", type="primary", use_container_width=True)
 
     if submitted:
         imported_path = None
@@ -200,25 +256,14 @@ def main() -> None:
                 risk_free_rate=float(risk_free_rate), refresh=refresh,
                 allow_stale_cache=allow_stale, skip_walk_forward=skip_walk_forward,
             )
-            with st.spinner("正在运行研究流程；此过程可能需要下载行情数据…"):
-                try:
-                    result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False, timeout=900)
-                except subprocess.TimeoutExpired:
-                    st.error("研究流程超过 15 分钟，已停止等待。请在终端中检查数据下载或网络状态。")
-                else:
-                    if result.returncode == 0:
-                        st.success("研究流程完成，结果已写入 outputs/。")
-                        if result.stdout:
-                            st.code(result.stdout[-12000:], language="text")
-                        st.rerun()
-                    else:
-                        st.error(f"研究流程失败（退出码 {result.returncode}）。请检查错误信息；未生成成功状态报告。")
-                        if result.stdout:
-                            st.text("标准输出")
-                            st.code(result.stdout[-8000:], language="text")
-                        if result.stderr:
-                            st.text("错误信息")
-                            st.code(result.stderr[-12000:], language="text")
+            try:
+                task = start_task(command, repository_root=ROOT)
+                st.sidebar.success(f"任务已提交：{task['task_id']}。你可以继续浏览上一次成功的分析结果。")
+                st.rerun()
+            except TaskAlreadyRunning as exc:
+                st.sidebar.warning(str(exc))
+            except Exception as exc:
+                st.sidebar.error(f"无法启动研究任务：{type(exc).__name__}: {exc}")
 
     imported_positions = None
     imported_alerts = []
@@ -230,14 +275,14 @@ def main() -> None:
         except Exception as exc:
             st.error(f"本地持仓文件无法解析：{exc}")
 
-    data_meta = read_json(OUTPUT_DIR / "analysis_metadata.json")
-    portfolio = read_json(OUTPUT_DIR / "portfolio_risk_summary.json")
-    backtest = read_json(OUTPUT_DIR / "backtest_summary.json")
-    validation = read_json(OUTPUT_DIR / "strategy_validation_metadata.json")
-    walk = read_json(OUTPUT_DIR / "walk_forward_summary.json")
-    memory = read_json(OUTPUT_DIR / "memory_allocation_summary.json")
-    memory_positions = read_csv(OUTPUT_DIR / "memory_position_diagnostics.csv")
-    memory_decisions = read_csv(OUTPUT_DIR / "memory_allocation_scenarios.csv")
+    data_meta = read_json(output_dir / "analysis_metadata.json")
+    portfolio = read_json(output_dir / "portfolio_risk_summary.json")
+    backtest = read_json(output_dir / "backtest_summary.json")
+    validation = read_json(output_dir / "strategy_validation_metadata.json")
+    walk = read_json(output_dir / "walk_forward_summary.json")
+    memory = read_json(output_dir / "memory_allocation_summary.json")
+    memory_positions = read_csv(output_dir / "memory_position_diagnostics.csv")
+    memory_decisions = read_csv(output_dir / "memory_allocation_scenarios.csv")
 
     if data_meta:
         st.caption(
@@ -257,7 +302,7 @@ def main() -> None:
         if imported_alerts:
             for alert in imported_alerts:
                 st.warning(alert["message"])
-        snapshot_reconciliation = read_json(OUTPUT_DIR / "holdings_reconciliation.json")
+        snapshot_reconciliation = read_json(output_dir / "holdings_reconciliation.json")
         if snapshot_reconciliation and not snapshot_reconciliation.get("within_tolerance", True):
             st.warning(
                 "导入持仓汇总与券商总额未在容差内对齐。请核对股数、报价时间、截图遗漏持仓、费用和汇总口径后，再依赖组合风险结果。"
@@ -277,11 +322,11 @@ def main() -> None:
         )
 
     overview_tab, risk_tab, backtest_tab, validation_tab, memory_tab, files_tab = st.tabs(
-        ["总览", "组合风险", "策略回测", "稳健性验证", "存储持仓", "结果文件"]
+        ["账户总览", "组合风险", "策略表现", "策略稳健性", "存储主题", "研究报告"]
     )
     with overview_tab:
-        latest_holdings = read_csv(OUTPUT_DIR / "holdings_valuation.csv")
-        latest_valuation_meta = read_csv(OUTPUT_DIR / "holdings_latest_price_weights.csv")
+        latest_holdings = read_csv(output_dir / "holdings_valuation.csv")
+        latest_valuation_meta = read_csv(output_dir / "holdings_latest_price_weights.csv")
         if latest_holdings is not None and not latest_holdings.empty:
             st.markdown("### 最新可用收盘价估值（非实时成交价）")
             columns = [name for name in (
@@ -327,14 +372,14 @@ def main() -> None:
             st.info("请先运行一次研究流程，页面会自动读取已生成的输出。")
 
     with risk_tab:
-        contributions = read_csv(OUTPUT_DIR / "portfolio_risk_contributions.csv")
+        contributions = read_csv(output_dir / "portfolio_risk_contributions.csv")
         if contributions is not None:
             st.markdown("### 各资产对组合波动的贡献")
             st.dataframe(contributions, use_container_width=True)
             if "percentage_of_portfolio_volatility" in contributions.columns:
                 plot = contributions.set_index(contributions.columns[0])[["percentage_of_portfolio_volatility"]]
                 st.bar_chart(plot)
-        rolling = read_csv(OUTPUT_DIR / "portfolio_rolling_risk.csv", date_index=True)
+        rolling = read_csv(output_dir / "portfolio_rolling_risk.csv", date_index=True)
         if rolling is not None and not rolling.empty:
             st.markdown("### 滚动波动率与回撤")
             for field in ("rolling_annualized_volatility", "rolling_max_drawdown"):
@@ -343,11 +388,11 @@ def main() -> None:
                     view.columns = [f"{int(col)} 日窗口" for col in view.columns]
                     st.write("年化波动率" if field == "rolling_annualized_volatility" else "滚动最大回撤")
                     st.line_chart(view)
-        drawdown = read_csv(OUTPUT_DIR / "portfolio_drawdown.csv", date_index=True)
+        drawdown = read_csv(output_dir / "portfolio_drawdown.csv", date_index=True)
         if drawdown is not None and "drawdown" in drawdown.columns:
             st.markdown("### 组合历史回撤")
             st.area_chart(drawdown[["drawdown"]])
-        stress = read_csv(OUTPUT_DIR / "portfolio_stress_tests.csv", date_index=False)
+        stress = read_csv(output_dir / "portfolio_stress_tests.csv", date_index=False)
         if stress is not None:
             st.markdown("### 压力情景")
             st.dataframe(stress, use_container_width=True)
@@ -355,17 +400,17 @@ def main() -> None:
             st.info("组合风险输出尚不存在。运行研究流程后这里会显示风险贡献、滚动风险和回撤。")
 
     with backtest_tab:
-        equity = read_csv(OUTPUT_DIR / "backtest_equity_curve.csv", date_index=True)
+        equity = read_csv(output_dir / "backtest_equity_curve.csv", date_index=True)
         if equity is not None and not equity.empty:
             st.markdown("### 策略与基准净值")
             st.line_chart(equity)
-        daily = read_csv(OUTPUT_DIR / "backtest_daily_returns.csv", date_index=True)
+        daily = read_csv(output_dir / "backtest_daily_returns.csv", date_index=True)
         if daily is not None:
             st.markdown("### 每日策略收益与换手")
             st.dataframe(daily.tail(100), use_container_width=True)
             if "strategy_return" in daily.columns:
                 st.line_chart(daily[["strategy_return", "benchmark_return"]].cumsum())
-        applied = read_csv(OUTPUT_DIR / "backtest_applied_weights.csv", date_index=True)
+        applied = read_csv(output_dir / "backtest_applied_weights.csv", date_index=True)
         if applied is not None:
             st.markdown("### 各收益区间使用的目标权重")
             st.line_chart(applied)
@@ -379,22 +424,22 @@ def main() -> None:
             x.metric("参数组合", int(validation.get("requested_combinations", 0)))
             y.metric("有效组合", int(validation.get("successful_combinations", 0)))
             z.metric("跳过组合", int(validation.get("skipped_combinations", 0)))
-        grid = read_csv(OUTPUT_DIR / "strategy_parameter_sweep.csv")
+        grid = read_csv(output_dir / "strategy_parameter_sweep.csv")
         if grid is not None:
             st.markdown("### 样本内 / 样本外参数网格")
             st.dataframe(grid, use_container_width=True)
-        yearly = read_csv(OUTPUT_DIR / "strategy_yearly_performance.csv")
+        yearly = read_csv(output_dir / "strategy_yearly_performance.csv")
         if yearly is not None:
             st.markdown("### 逐年表现")
             st.dataframe(yearly, use_container_width=True)
         if walk:
             st.markdown("### 滚动 Walk-forward 汇总")
             st.json(walk)
-        folds = read_csv(OUTPUT_DIR / "walk_forward_folds.csv")
+        folds = read_csv(output_dir / "walk_forward_folds.csv")
         if folds is not None:
             st.markdown("### 每轮参数选择与测试结果")
             st.dataframe(folds, use_container_width=True)
-        oos = read_csv(OUTPUT_DIR / "walk_forward_oos_returns.csv", date_index=True)
+        oos = read_csv(output_dir / "walk_forward_oos_returns.csv", date_index=True)
         if oos is not None and {"strategy_return", "benchmark_return"}.issubset(oos.columns):
             st.markdown("### 样本外收益序列")
             equity_oos = (1.0 + oos[["strategy_return", "benchmark_return"]]).cumprod()
@@ -453,7 +498,7 @@ def main() -> None:
             [{"文件": name, "存在": "是" if exists else "否"} for name, exists in status.items()]
         )
         st.dataframe(output_table, hide_index=True, use_container_width=True)
-        report_path = OUTPUT_DIR / "research_report.md"
+        report_path = output_dir / "research_report.md"
         if report_path.exists():
             st.markdown("### 综合研究报告")
             st.markdown(report_path.read_text(encoding="utf-8"))
