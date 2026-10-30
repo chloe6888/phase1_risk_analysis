@@ -45,6 +45,8 @@ def make_error_row(symbol: str, message: str) -> dict[str, Any]:
         "company_name": symbol,
         "currency": None,
         "financial_currency": None,
+        "cash_currency": None,
+        "debt_currency": None,
         "eps_currency": None,
         "currency_mismatch": False,
         "dcf_currency_mismatch": False,
@@ -144,18 +146,19 @@ def render_report(rows: list[dict[str, Any]], generated_at: str, symbols: list[s
     ]
     for row in rows:
         currency = str(row.get("currency") or "USD")
+        financial_currency = str(row.get("financial_currency") or currency)
         lines += [
             f"### {row['ticker']} — {row.get('company_name') or row['ticker']}",
             "",
             f"- 当前参考价格：{fmt_money(row.get('current_price'), currency)}（日期：{row.get('price_date') or '未知'}）",
             f"- 报价币种 / 财务报表币种 / EPS币种：{row.get('currency') or '未知'} / {row.get('financial_currency') or '未知'} / {row.get('eps_currency') or '未知'}",
             f"- 远期 EPS：{fmt_number(row.get('forward_eps'))}（来源：{row.get('eps_source') or '缺失'}）",
-            f"- 数据源自由现金流：{fmt_money(row.get('free_cash_flow'), currency)}（来源：{row.get('fcf_source') or '缺失'}）",
-            f"- DCF 实际使用的现金流：{fmt_money(row.get('valuation_fcf'), currency)}（口径：{row.get('fcf_basis') or '不可用'}）",
+            f"- 数据源自由现金流：{fmt_money(row.get('free_cash_flow'), financial_currency)}（来源：{row.get('fcf_source') or '缺失'}）",
+            f"- DCF 实际使用的现金流：{fmt_money(row.get('valuation_fcf'), financial_currency)}（口径：{row.get('fcf_basis') or '不可用'}）",
             f"- 股数（数据源）：{fmt_number(row.get('diluted_shares'))}",
-            f"- 现金 / 债务：{fmt_money(row.get('cash'), currency)} / {fmt_money(row.get('debt'), currency)}",
-            f"- 营收 / 毛利：{fmt_money(row.get('revenue'), currency)} / {fmt_money(row.get('gross_profit'), currency)}",
-            f"- 营业利润 / 净利润 / EBITDA：{fmt_money(row.get('operating_income'), currency)} / {fmt_money(row.get('net_income'), currency)} / {fmt_money(row.get('ebitda'), currency)}",
+            f"- 现金 / 债务：{fmt_money(row.get('cash'), financial_currency)} / {fmt_money(row.get('debt'), financial_currency)}",
+            f"- 营收 / 毛利：{fmt_money(row.get('revenue'), financial_currency)} / {fmt_money(row.get('gross_profit'), financial_currency)}",
+            f"- 营业利润 / 净利润 / EBITDA：{fmt_money(row.get('operating_income'), financial_currency)} / {fmt_money(row.get('net_income'), financial_currency)} / {fmt_money(row.get('ebitda'), financial_currency)}",
             f"- 营收同比：{fmt_percent(row.get('revenue_growth_yoy'))}；毛利率：{fmt_percent(row.get('gross_margin'))}；营业利润率：{fmt_percent(row.get('operating_margin'))}；净利率：{fmt_percent(row.get('net_margin'))}",
             f"- ROE / ROA：{fmt_percent(row.get('return_on_equity'))} / {fmt_percent(row.get('return_on_assets'))}",
             f"- Trailing PE / Forward PE（数据源）：{fmt_number(row.get('trailing_pe'))} / {fmt_number(row.get('forward_pe'))}",
