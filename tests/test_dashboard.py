@@ -102,6 +102,50 @@ def test_dashboard_formats_missing_metrics_in_chinese() -> None:
     assert app._number(None) == "暂无数据"
 
 
+def test_short_history_warning_marks_only_samples_below_one_trading_year() -> None:
+    assert app._short_history_warning(252) is None
+    assert app._short_history_warning(300) is None
+    warning = app._short_history_warning(251)
+    assert warning is not None
+    assert "251 个共同收益观测" in warning
+    assert "252 个交易日" in warning
+
+
+def test_walk_forward_overview_exposes_out_of_sample_metrics() -> None:
+    walk = {
+        "folds_successful": 4,
+        "folds_total": 5,
+        "oos_observations": 252,
+        "first_oos_date": "2024-01-01",
+        "last_oos_date": "2024-12-31",
+        "out_of_sample_strategy": {"total_return": 0.18},
+        "out_of_sample_benchmark": {"total_return": 0.12},
+        "out_of_sample_excess_total_return": 0.06,
+        "selection_warning": "Use prior training data only.",
+    }
+    result = app._walk_forward_overview(walk)
+    assert result is not None
+    assert result["folds_successful"] == 4
+    assert result["folds_total"] == 5
+    assert result["oos_observations"] == 252
+    assert result["strategy_total_return"] == 0.18
+    assert result["benchmark_total_return"] == 0.12
+    assert result["excess_total_return"] == 0.06
+
+
+def test_display_frame_localizes_walk_forward_status_and_parameters() -> None:
+    frame = pd.DataFrame({
+        "status": ["OK", "SKIPPED"],
+        "selected_rebalance_freq": ["weekly", "monthly"],
+        "selection_metric": ["sharpe_ratio", "annualized_return"],
+    })
+    shown = app._display_frame(frame)
+    assert shown is not None
+    assert shown["验证状态"].tolist() == ["通过", "数据不足，已跳过"]
+    assert shown["选中调仓频率"].tolist() == ["每周", "每月"]
+    assert shown["参数选择指标"].tolist() == ["夏普比率", "年化收益率"]
+
+
 def test_display_frame_translates_common_columns_and_actions() -> None:
     frame = pd.DataFrame({
         "ticker": ["MU"],
