@@ -112,10 +112,16 @@ def build_strategy_weights(
         selected = pd.DataFrame(True, index=prices.index, columns=universe)
         weights = _equalize(selected)
     elif strategy == "cross_sectional_momentum":
-        weights = generate_cross_sectional_momentum_weights(
-            prices, lookback=lookback, skip_recent=max(1, skip_recent),
-            top_n=top_n, benchmark=benchmark,
-        )
+        if skip_recent > 0:
+            weights = generate_cross_sectional_momentum_weights(
+                prices, lookback=lookback, skip_recent=skip_recent,
+                top_n=top_n, benchmark=benchmark,
+            )
+        else:
+            scores = assets.div(assets.shift(lookback)).sub(1.0)
+            ranks = scores.rank(axis=1, method="first", ascending=False)
+            selected = ranks.le(top_n) & scores.notna()
+            weights = _equalize(selected)
     elif strategy == "time_series_momentum":
         trailing_return = assets.div(assets.shift(lookback)).sub(1.0)
         weights = _equalize(trailing_return.gt(0) & trailing_return.notna())
@@ -554,7 +560,9 @@ def main() -> None:
         "",
         "## 候选策略比较",
         "",
-        comparison.to_markdown(index=False),
+        "~~~text",
+        comparison.to_string(index=False),
+        "~~~",
         "",
         "## 重要限制",
         "",
