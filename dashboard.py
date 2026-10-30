@@ -26,6 +26,16 @@ PIPELINE_SCRIPT = ROOT / "run_research.py"
 PRIVATE_HOLDINGS_PATH = ROOT / "data" / "private" / "holdings_snapshot.csv"
 MIN_RISK_HISTORY_OBSERVATIONS = 252
 
+RISK_METRIC_EXPLANATIONS = {
+    "年化波动率": "把日收益率的起伏折算成年化标准差。例：年化波动率 20% 表示历史收益波动幅度较大，不表示一年最多只会亏 20%。",
+    "最大回撤": "历史净值从前期高点到随后低点的最大跌幅。例：净值从 100 降到 80，最大回撤就是 -20%；它不是未来亏损上限。",
+    "夏普比率": "衡量每承担一单位总波动，历史上获得了多少超额收益。例：夏普比率 1，表示年化超额收益约等于年化波动率；越高不保证未来越好。",
+    "索提诺比率": "与夏普类似，但重点惩罚低于目标的下行波动。例：索提诺比率 1，表示年化超额收益约等于下行波动尺度。",
+    "单期 VaR": "历史 95% VaR 为 2%，可理解为样本中约 95% 的单期损失没有超过 2%；剩余约 5% 的情形可能亏得更多。它不是最大亏损保证。",
+    "单期 CVaR": "落入最差约 5% 单期情形时的平均损失估计。例：CVaR 为 3%，表示这些尾部情形平均损失约 3%，不代表最坏只亏 3%。",
+    "Beta（贝塔）": "衡量资产历史上对基准涨跌的敏感度。例：Beta 为 1.2，基准变动 1% 时，该资产历史上平均同向变动约 1.2%；不代表每一天都会如此。",
+}
+
 
 def read_json(path: str | Path) -> dict[str, Any] | None:
     """Read a JSON object if present; return None for an absent result file."""
@@ -328,6 +338,99 @@ def _walk_forward_overview(walk: dict[str, Any] | None) -> dict[str, Any] | None
         "excess_total_return": walk.get("out_of_sample_excess_total_return"),
         "selection_warning": walk.get("selection_warning"),
     }
+
+
+def _signed_delta_text(value: Any, *, unit: str = "个百分点") -> str | None:
+    """Render a signed comparison with a direction cue independent of color."""
+    number = _float_or_none(value)
+    if number is None or not math.isfinite(number):
+        return None
+    scaled = number * 100.0
+    if scaled > 1e-10:
+        return f"↑ +{scaled:.2f} {unit} vs 基准"
+    if scaled < -1e-10:
+        return f"↓ {scaled:.2f} {unit} vs 基准"
+    return f"→ 0.00 {unit} vs 基准"
+
+
+def _walk_forward_plain_language(walk: dict[str, Any] | None) -> str | None:
+    """Create a deterministic Chinese explanation from walk-forward outputs."""
+    result = _walk_forward_overview(walk)
+    if result is None:
+        return None
+    observations = result["oos_observations"]
+    folds = f"{result['folds_successful']} / {result['folds_total']} 轮"
+    if observations <= 0:
+        return f"滚动样本外验证尚未产生可用检验数据（成功 {folds}）。这通常意味着历史数据不足或各轮参数均未能完成验证。"
+    strategy = _float_or_none(result["strategy_total_return"])
+    benchmark = _float_or_none(result["benchmark_total_return"])
+    excess = _float_or_none(result["excess_total_return"])
+    if strategy is None or benchmark is None:
+        return f"滚动样本外验证覆盖 {observations} 个交易日，成功 {folds}；但策略或基准累计收益缺失，暂时无法比较表现。"
+    if excess is None:
+        excess = strategy - benchmark
+    delta_pp = excess * 100.0
+    if delta_pp > 1e-10:
+        comparison = f"策略累计收益比基准高约 {delta_pp:.2f} 个百分点"
+    elif delta_pp < -1e-10:
+        comparison = f"策略累计收益比基准低约 {abs(delta_pp):.2f} 个百分点"
+    else:
+        comparison = "策略累计收益与基准大致持平"
+    return (
+        f"滚动检验覆盖 {observations} 个样本外交易日，成功 {folds}；"
+        f"策略累计收益 {_pct(strategy)}，基准 {_pct(benchmark)}，{comparison}。"
+        "这是按历史训练/检验顺序得到的结果，不是未来收益预测。"
+    )
+
+
+def _portfolio_risk_plain_language(
+    portfolio: dict[str, Any] | None,
+    contributions: pd.DataFrame | None = None,
+) -> str | None:
+    """Summarize realized portfolio risk without extrapolating beyond supplied data."""
+    if not portfolio:
+        return None
+    parts: list[str] = []
+    volatility = _float_or_none(portfolio.get("annualized_volatility"))
+    drawdown = _float_or_none(portfolio.get("max_drawdown"))
+    if volatility is not None:
+        parts.append(f"这段历史的年化波动约为 {abs(volatility) * 100:.1f}%")
+    if drawdown is not None:
+        parts.append(f"最大回撤约为 {abs(drawdown) * 100:.1f}%")
+    summary = "；".join(parts) + "。" if parts else "当前风险指标不完整。"
+    if contributions is not None and not contributions.empty and "percentage_of_portfolio_volatility" in contributions.columns:
+        values = pd.to_numeric(contributions["percentage_of_portfolio_volatility"], errors="coerce")
+        valid = values.dropna()
+        if not valid.empty:
+            position = valid.abs().idxmax()
+            row = contributions.loc[position]
+            asset = row.get("asset") if "asset" in contributions.columns else None
+            if asset is None:
+                asset = position
+            contribution = float(values.loc[position])
+            summary += f"风险贡献较大的持仓是 {asset}，约占组合波动贡献的 {contribution * 100:.1f}%。"
+    return summary
+
+
+def _holdings_plain_language(summary: dict[str, Any] | None, alerts: list[dict[str, Any]] | None = None) -> str | None:
+    """Summarize observed position concentration in plain Chinese."""
+    if not summary:
+        return None
+    ticker = summary.get("largest_position_ticker")
+    ticker_weight = summary.get("largest_position_weight_pct")
+    group = summary.get("largest_risk_group")
+    group_weight = summary.get("largest_risk_group_weight_pct")
+    count = len(alerts or [])
+    parts = []
+    if ticker and ticker_weight is not None:
+        parts.append(f"最大单一持仓是 {ticker}，约占导入证券持仓的 {float(ticker_weight):.1f}%")
+    if group and group_weight is not None:
+        parts.append(f"占比最高的风险主题是 {group}，约占 {float(group_weight):.1f}%")
+    if count:
+        parts.append(f"目前触发 {count} 项集中度提醒")
+    else:
+        parts.append("目前未触发默认集中度提醒")
+    return "；".join(parts) + "。以上比例仅按已导入的股票和 ETF 计算，不自动包含现金、债券或其他账户。"
 
 
 def _display_frame(frame: pd.DataFrame | None) -> pd.DataFrame | None:
@@ -659,6 +762,14 @@ def main() -> None:
     )
     st.title("个人投资研究工作台")
     st.caption("以中文呈现持仓、风险与策略研究结果。所有数据用于辅助分析，不连接券商、不执行真实交易。")
+    color_preference = st.sidebar.radio(
+        "收益数字颜色",
+        options=["美股习惯：涨绿跌红", "A 股习惯：涨红跌绿"],
+        index=0,
+        help="只影响指标卡中正负收益差值的颜色；曲线颜色用于区分系列，不表示涨跌方向。",
+    )
+    metric_delta_color = "normal" if color_preference.startswith("美股") else "inverse"
+    st.sidebar.caption("收益差值同时显示 ↑ / ↓ 和正负号，不只依赖颜色。")
     st.markdown(
         "**使用流程：** ① 导入持仓或填写组合权重 → ② 核对研究设置 → ③ 开始研究 → ④ 查看风险与报告。"
     )
@@ -698,31 +809,54 @@ def main() -> None:
                 help="填写整个投资账户的净资产：股票、ETF、现金及其他资产，减去融资和负债。金额币种必须与持仓 CSV 一致；留空（0）则只能按导入的上市证券计算主题占比。",
             )
 
-            with st.expander("高级研究设置（一般保持默认即可）", expanded=False):
-                setting_a, setting_b = st.columns(2)
-                with setting_a:
-                    benchmark = st.text_input("对比基准（用于衡量相对表现）", value="SPY").strip().upper() or "SPY"
-                    test_start = st.date_input("样本外检验开始日期", value=date(2023, 1, 1))
-                    lookbacks = st.text_input("动量观察区间（交易日）", value="63,126,252")
-                    skips = st.text_input("跳过最近的交易日数", value="5,21")
-                    top_ns = st.text_input("每期选取的持仓数量", value="1,2,3")
-                with setting_b:
-                    train_window = st.number_input("训练区间长度（交易日）", min_value=20, max_value=2000, value=252)
-                    test_window = st.number_input("每轮检验区间长度（交易日）", min_value=10, max_value=500, value=63)
-                    cost_bps = st.number_input("单边交易成本估计（基点）", min_value=0.0, max_value=1000.0, value=5.0, step=1.0)
-                    slippage_bps = st.number_input("滑点估计（基点）", min_value=0.0, max_value=1000.0, value=5.0, step=1.0)
-                    risk_free_rate = st.number_input("年化无风险利率（小数）", min_value=-0.5, max_value=1.0, value=0.0, step=0.005, format="%.3f")
-                refresh = st.checkbox("强制重新下载全部行情（耗时可能更长）", value=False)
-                allow_stale = st.checkbox(
-                    "行情刷新失败时，允许使用旧缓存",
-                    value=False,
-                    help="旧缓存可能过期。只有明确接受数据时效风险时才勾选。",
-                )
-                skip_walk_forward = st.checkbox(
-                    "跳过滚动样本外验证",
-                    value=False,
-                    help="仅在历史数据长度不足、无法完成滚动验证时使用。",
-                )
+            research_mode = st.radio(
+                "研究设置模式",
+                options=["简易模式", "专业模式"],
+                horizontal=True,
+                help="简易模式只保留常用的组合输入、基准和检验起始日期；专业模式可修改回测与验证参数。",
+                key="research_settings_mode",
+            )
+            benchmark = st.text_input(
+                "对比基准",
+                value="SPY",
+                help="例如 SPY 代表标普 500 ETF。策略相对表现会与这个基准比较。",
+            ).strip().upper() or "SPY"
+            test_start = st.date_input(
+                "样本外检验开始日期",
+                value=date(2023, 1, 1),
+                help="这一天及之后的数据用于单次样本外评估。应根据本地行情历史长度选择，不能反复用检验结果调参。",
+            )
+            # Simple mode keeps a stable, documented default parameter set.
+            lookbacks, skips, top_ns = "63,126,252", "5,21", "1,2,3"
+            train_window, test_window = 252, 63
+            cost_bps, slippage_bps, risk_free_rate = 5.0, 5.0, 0.0
+            refresh, allow_stale, skip_walk_forward = False, False, False
+            if research_mode == "专业模式":
+                with st.expander("高级研究设置", expanded=True):
+                    setting_a, setting_b = st.columns(2)
+                    with setting_a:
+                        lookbacks = st.text_input("动量观察区间（交易日）", value=lookbacks, help="候选回看窗口；多个值用英文逗号分隔。")
+                        skips = st.text_input("跳过最近的交易日数", value=skips, help="避开最近短期反转区间；多个值用英文逗号分隔。")
+                        top_ns = st.text_input("每期选取的持仓数量", value=top_ns, help="每期按信号排名选取前 N 个标的。")
+                    with setting_b:
+                        train_window = st.number_input("训练区间长度（交易日）", min_value=20, max_value=2000, value=train_window, help="每轮训练阶段用于选参数的历史收益观测数量。")
+                        test_window = st.number_input("每轮检验区间长度（交易日）", min_value=10, max_value=500, value=test_window, help="每轮选定参数后，向前验证的非重叠交易日数量。")
+                        cost_bps = st.number_input("单边交易成本估计（基点）", min_value=0.0, max_value=1000.0, value=cost_bps, step=1.0, help="1 个基点等于 0.01%；5 个基点等于 0.05%。")
+                        slippage_bps = st.number_input("滑点估计（基点）", min_value=0.0, max_value=1000.0, value=slippage_bps, step=1.0, help="成交价相对参考价的不利偏差估计。")
+                        risk_free_rate = st.number_input("年化无风险利率（小数）", min_value=-0.5, max_value=1.0, value=risk_free_rate, step=0.005, format="%.3f", help="例如 0.04 表示年化 4%；只在没有单独提供日期化收益率序列时使用。")
+                    refresh = st.checkbox("强制重新下载全部行情（耗时可能更长）", value=False)
+                    allow_stale = st.checkbox(
+                        "行情刷新失败时，允许使用旧缓存",
+                        value=False,
+                        help="旧缓存可能过期。只有明确接受数据时效风险时才勾选。",
+                    )
+                    skip_walk_forward = st.checkbox(
+                        "跳过滚动样本外验证",
+                        value=False,
+                        help="仅在历史数据长度不足、无法完成滚动验证时使用。跳过后不能把样本内结果当作样本外证据。",
+                    )
+            else:
+                st.caption("简易模式使用默认参数：回看窗口 63/126/252 日、跳过近期 5/21 日、持有 1/2/3 只；训练/检验窗口 252/63 日，成本与滑点各 5 个基点。")
             submitted = st.form_submit_button("开始研究", type="primary", use_container_width=True)
 
     if submitted:
@@ -774,6 +908,7 @@ def main() -> None:
     memory = read_json(output_dir / "memory_allocation_summary.json")
     memory_positions = read_csv(output_dir / "memory_position_diagnostics.csv")
     memory_decisions = read_csv(output_dir / "memory_allocation_scenarios.csv")
+    risk_contributions = read_csv(output_dir / "portfolio_risk_contributions.csv")
     latest_holdings = read_csv(output_dir / "holdings_valuation.csv")
     valuation_output_dir = active_output_dir(ROOT, task_type="valuation")
     valuation_summary = read_csv(valuation_output_dir / "valuation_summary.csv")
@@ -805,6 +940,7 @@ def main() -> None:
 
     with overview_tab:
         st.subheader("账户概览")
+        st.caption("本页回答：当前持仓集中在哪里？历史风险有多大？策略在未参与选参的后续区间表现如何？")
         st.markdown("### 当前风险重点")
         if imported_summary is not None:
             summary_cols = st.columns(4)
@@ -819,6 +955,10 @@ def main() -> None:
                     st.caption(f"另有 {len(imported_alerts) - 4} 项提醒，详见投资决策复核页。")
             else:
                 st.info("按当前导入持仓和默认集中度阈值，暂未触发单一持仓、风险主题或行业集中度提醒。")
+            plain_holdings = _holdings_plain_language(imported_summary, imported_alerts)
+            if plain_holdings:
+                st.markdown("**大白话总结**")
+                st.info(plain_holdings)
         else:
             st.info("尚未导入持仓快照。可以先上传 CSV，或只用组合权重运行历史风险研究。")
 
@@ -832,16 +972,18 @@ def main() -> None:
             oos_cols[0].metric(
                 "样本外策略累计收益",
                 _pct(walk_overview["strategy_total_return"]),
-                help="每轮只用此前训练区间选择参数，再应用到后续检验区间；仍是历史结果，不代表未来。",
+                delta=_signed_delta_text(walk_overview["excess_total_return"]),
+                delta_color=metric_delta_color,
+                help="每轮只用此前训练区间选择参数，再应用到后续检验区间；仍是历史结果，不代表未来。差值显示相对基准的百分点变化。",
             )
             oos_cols[1].metric(
                 "样本外基准累计收益",
                 _pct(walk_overview["benchmark_total_return"]),
             )
             oos_cols[2].metric(
-                "样本外相对基准差值",
-                _pct(walk_overview["excess_total_return"]),
-                help="样本外策略累计收益减去同一检验区间的基准累计收益。",
+                "成功验证轮次",
+                f"{walk_overview['folds_successful']} / {walk_overview['folds_total']}",
+                help="每一轮都先用过去的数据选择参数，再在紧随其后的区间检验。",
             )
             st.caption(
                 f"成功验证 {walk_overview['folds_successful']} / {walk_overview['folds_total']} 轮 · "
@@ -849,6 +991,10 @@ def main() -> None:
                 f"区间 {walk_overview['first_oos_date'] or '暂无'} 至 "
                 f"{walk_overview['last_oos_date'] or '暂无'}"
             )
+            walk_summary = _walk_forward_plain_language(walk)
+            if walk_summary:
+                st.markdown("**大白话总结**")
+                st.info(walk_summary)
             if walk_overview["selection_warning"]:
                 st.warning("样本外结果仍受多重参数检验影响，不能替代最终未触碰的独立留出区间。避免根据检验期表现反复调参。")
         else:
@@ -858,16 +1004,12 @@ def main() -> None:
             )
 
         if portfolio:
-            risk_snapshot_cols = st.columns(3)
-            risk_snapshot_cols[0].metric("历史最大回撤", _pct(portfolio.get("max_drawdown")), help="历史区间中从高点到随后低点的最大跌幅，不是未来损失上限。")
-            risk_snapshot_cols[1].metric("年化波动率", _pct(portfolio.get("annualized_volatility")))
-            risk_snapshot_cols[2].metric("历史有效观测", f"{portfolio.get('observations', 0)} 个交易日")
-        if portfolio:
-            metric_cols = st.columns(4)
+            metric_cols = st.columns(5)
             metric_cols[0].metric("区间累计收益", _pct(portfolio.get("total_return")), help="研究区间内组合净值的累计变化，不代表未来收益。")
             metric_cols[1].metric("年化收益率", _pct(portfolio.get("annualized_return")), help="将历史区间收益折算为年化口径，样本较短时参考价值有限。")
-            metric_cols[2].metric("年化波动率", _pct(portfolio.get("annualized_volatility")), help="历史日收益波动的年化估计，不等同于最大可能亏损。")
-            metric_cols[3].metric("最大回撤", _pct(portfolio.get("max_drawdown")), help="研究区间内从历史净值高点到随后低点的最大跌幅。")
+            metric_cols[2].metric("年化波动率", _pct(portfolio.get("annualized_volatility")), help=RISK_METRIC_EXPLANATIONS["年化波动率"])
+            metric_cols[3].metric("最大回撤", _pct(portfolio.get("max_drawdown")), help=RISK_METRIC_EXPLANATIONS["最大回撤"])
+            metric_cols[4].metric("有效收益观测", f"{portfolio.get('observations', '暂无')} 个交易日", help="组合和基准在相同日期上可用于统计的收益观测数量。")
             st.caption(
                 f"统计区间：{portfolio.get('start_date', '暂无')} 至 {portfolio.get('end_date', '暂无')} · "
                 f"有效收益观测：{portfolio.get('observations', '暂无')} 个交易日"
@@ -899,11 +1041,17 @@ def main() -> None:
             ]
             st.dataframe(_display_frame(latest_holdings[[col for col in columns if col in latest_holdings.columns]]), hide_index=True, use_container_width=True)
         if backtest:
-            st.markdown("### 策略相对基准表现")
+            st.markdown("### 历史基准回测表现（仅供参考）")
             strategy = backtest.get("strategy", {})
             benchmark_result = backtest.get("benchmark", {})
             left, right, extra = st.columns(3)
-            left.metric("策略累计收益", _pct(strategy.get("total_return")))
+            left.metric(
+                "历史策略累计收益",
+                _pct(strategy.get("total_return")),
+                delta=_signed_delta_text(backtest.get("excess_total_return")),
+                delta_color=metric_delta_color,
+                help="这是完整历史区间上的基准回测，并非独立样本外结果。差值为策略相对基准的累计收益百分点。",
+            )
             right.metric("对比基准累计收益", _pct(benchmark_result.get("total_return")))
             extra.metric("相对基准差值", _pct(backtest.get("excess_total_return")), help="策略累计收益减去基准累计收益；不是未来超额收益预测。")
         if not portfolio and imported_positions is None and not backtest:
@@ -914,7 +1062,7 @@ def main() -> None:
 
     with decision_tab:
         st.subheader("投资决策复核")
-        st.caption("把当前持仓、估值情景和仓位风险放在一起核对。这里提供研究依据与复核条件，不生成自动买卖指令。")
+        st.caption("本页回答：哪些持仓值得进一步复核？当前估值假设与持仓风险是否一致？这里提供研究依据，不生成自动买卖指令。")
         same_holdings = _holdings_match_snapshot(imported_positions, latest_holdings)
         review_holdings = latest_holdings if same_holdings else imported_positions
         if imported_positions is not None and latest_holdings is not None and not same_holdings:
@@ -958,28 +1106,30 @@ def main() -> None:
 
     with risk_tab:
         st.subheader("组合风险")
-        st.caption("这一页回答三个问题：风险主要来自哪里、组合历史上经历过多大回撤、在假设冲击下可能受到多大影响。")
+        st.caption("本页回答：组合波动有多大？哪些持仓贡献了主要风险？历史最大回撤是多少？假设市场冲击下可能损失多少？")
         if portfolio:
             risk_cols = st.columns(4)
-            risk_cols[0].metric("年化波动率", _pct(portfolio.get("annualized_volatility")))
-            risk_cols[1].metric("最大回撤", _pct(portfolio.get("max_drawdown")))
-            risk_cols[2].metric("夏普比率", _number(portfolio.get("sharpe_ratio")), help="单位风险对应的历史超额收益表现，数值越高不代表未来一定更好。")
-            risk_cols[3].metric("索提诺比率", _number(portfolio.get("sortino_ratio")), help="侧重下行波动的历史风险调整收益指标。")
+            risk_cols[0].metric("年化波动率", _pct(portfolio.get("annualized_volatility")), help=RISK_METRIC_EXPLANATIONS["年化波动率"])
+            risk_cols[1].metric("最大回撤", _pct(portfolio.get("max_drawdown")), help=RISK_METRIC_EXPLANATIONS["最大回撤"])
+            risk_cols[2].metric("夏普比率", _number(portfolio.get("sharpe_ratio")), help=RISK_METRIC_EXPLANATIONS["夏普比率"])
+            risk_cols[3].metric("索提诺比率", _number(portfolio.get("sortino_ratio")), help=RISK_METRIC_EXPLANATIONS["索提诺比率"])
             short_history_warning = _short_history_warning(portfolio.get("observations"))
             if short_history_warning:
                 st.warning(short_history_warning)
-            st.caption("VaR 是基于历史样本估算的单期损失分位数；CVaR 是落入尾部情形时的平均损失估计。二者都不是最大亏损保证。")
-            risk_table = pd.DataFrame([
-                {"指标": "累计收益率", "数值": _pct(portfolio.get("total_return"))},
-                {"指标": "年化收益率", "数值": _pct(portfolio.get("annualized_return"))},
-                {"指标": "年化波动率", "数值": _pct(portfolio.get("annualized_volatility"))},
-                {"指标": "夏普比率", "数值": _number(portfolio.get("sharpe_ratio"))},
-                {"指标": "索提诺比率", "数值": _number(portfolio.get("sortino_ratio"))},
-                {"指标": "最大回撤", "数值": _pct(portfolio.get("max_drawdown"))},
-                {"指标": "历史单期风险价值（VaR）", "数值": _pct(portfolio.get("historical_var_one_period"))},
-                {"指标": "历史尾部平均损失（CVaR）", "数值": _pct(portfolio.get("historical_cvar_one_period"))},
-            ])
-            st.dataframe(risk_table, hide_index=True, use_container_width=True)
+            tail_cols = st.columns(2)
+            tail_cols[0].metric("单期 VaR（历史 95%）", _pct(portfolio.get("historical_var_one_period")), help=RISK_METRIC_EXPLANATIONS["单期 VaR"])
+            tail_cols[1].metric("单期 CVaR（历史 95%）", _pct(portfolio.get("historical_cvar_one_period")), help=RISK_METRIC_EXPLANATIONS["单期 CVaR"])
+            return_cols = st.columns(2)
+            return_cols[0].metric("区间累计收益", _pct(portfolio.get("total_return")))
+            return_cols[1].metric("年化收益率", _pct(portfolio.get("annualized_return")))
+            risk_summary = _portfolio_risk_plain_language(portfolio, risk_contributions)
+            if risk_summary:
+                st.markdown("**大白话总结**")
+                st.info(risk_summary)
+            with st.expander("关键指标怎么理解？"):
+                for metric_name, explanation in RISK_METRIC_EXPLANATIONS.items():
+                    suffix = "（当前组合汇总未单独计算此值）" if metric_name.startswith("Beta") else ""
+                    st.markdown(f"**{metric_name}**：{explanation}{suffix}")
         if imported_positions is not None and not imported_positions.empty:
             st.markdown("### 持仓结构与集中度")
             group_frame = _risk_exposure_frame(imported_positions, "risk_group", "风险主题")
@@ -993,7 +1143,7 @@ def main() -> None:
                 st.caption("按行业分类划分（基于导入持仓参考价）")
                 if not subgroup_frame.empty:
                     st.bar_chart(subgroup_frame.set_index("行业分类"))
-        contributions = read_csv(output_dir / "portfolio_risk_contributions.csv")
+        contributions = risk_contributions
         if contributions is not None:
             st.markdown("### 各持仓对组合波动的贡献")
             st.dataframe(_display_frame(contributions), hide_index=True, use_container_width=True)
@@ -1029,8 +1179,8 @@ def main() -> None:
     with backtest_tab:
         st.subheader("历史基准回测（仅供参考）")
         st.caption(
-            "这一页展示完整历史区间上的基准回测，不是独立样本外验证。请优先参考账户概览中的滚动样本外结果；"
-            "历史收益不能代表未来，也不等于真实交易成交结果。"
+            "本页回答：按当前信号和成本假设，策略在这段历史上如何表现？请优先参考账户概览中的滚动样本外结果；"
+            "这里的完整历史回测不是独立样本外验证，也不代表未来收益或真实成交。"
         )
         equity = read_csv(output_dir / "backtest_equity_curve.csv", date_index=True)
         if equity is not None and not equity.empty:
@@ -1051,7 +1201,7 @@ def main() -> None:
 
     with validation_tab:
         st.subheader("稳健性检验")
-        st.caption("这一页检查策略是否过度依赖某一组参数，以及换一段历史区间后结果是否仍然稳定。")
+        st.caption("本页回答：参数稍微变化时结果是否仍然相近？训练期表现好的参数，在后续检验期是否也有效？")
         if validation:
             x, y, z = st.columns(3)
             x.metric("尝试的参数组合", int(validation.get("requested_combinations", 0)))
@@ -1093,7 +1243,7 @@ def main() -> None:
 
     with valuation_tab:
         st.subheader("个股基本面估值")
-        st.caption("用 DCF（现金流折现）与远期 PE（市盈率）做情景交叉检查。默认假设是可修改的研究起点，不是市场一致预期或公司指引。")
+        st.caption("本页回答：当前价格相对不同经营假设下的估值区间处于什么位置？DCF（现金流折现）和远期 PE（市盈率）是交叉检查工具，不是目标价承诺。")
         valuation_symbols = st.multiselect(
             "选择需要研究的股票",
             options=["GOOG", "NVDA", "MU", "SKHY"],
@@ -1185,7 +1335,7 @@ def main() -> None:
 
     with memory_tab:
         st.subheader("存储主题持仓分析")
-        st.caption("检查 MU、SKHY 与 DRAM 之间的重叠敞口，避免直接持股和 ETF 间接持股叠加后过度集中。")
+        st.caption("本页回答：MU、SKHY 与 DRAM 合计占了多少风险预算？直接持股与 ETF 穿透后是否重复押注同一发行人？")
         if memory:
             a, b, c, d = st.columns(4)
             a.metric("存储主题当前占比", _pct(float(memory.get("memory_sleeve_weight_pct", 0.0)) / 100.0))
@@ -1255,7 +1405,7 @@ def main() -> None:
 
     with files_tab:
         st.subheader("研究报告与结果文件")
-        st.caption("这里查看本次研究是否生成了关键文件，以及综合报告中的结论和限制。")
+        st.caption("本页回答：本次研究用了哪些数据、生成了哪些结果文件？结论有哪些重要限制需要在行动前核对？")
         output_table = pd.DataFrame([
             {"文件用途": FILE_LABELS.get(name, name), "生成状态": "已生成" if exists else "尚未生成"}
             for name, exists in status.items()
