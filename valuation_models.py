@@ -160,6 +160,7 @@ def value_ticker(
     cash = finite_number(fundamentals.get("cash"))
     debt = finite_number(fundamentals.get("debt"))
     forward_eps = finite_number(fundamentals.get("forward_eps"))
+    currency_mismatch = bool(fundamentals.get("currency_mismatch", False))
     reported_fcf = finite_number(fundamentals.get("free_cash_flow"))
     normalized_fcf = cfg["normalized_fcf"]
     valuation_fcf = normalized_fcf if normalized_fcf is not None else reported_fcf
@@ -169,6 +170,8 @@ def value_ticker(
         "ticker": symbol,
         "company_name": fundamentals.get("company_name"),
         "currency": fundamentals.get("currency", "USD"),
+        "financial_currency": fundamentals.get("financial_currency", fundamentals.get("currency", "USD")),
+        "currency_mismatch": currency_mismatch,
         "current_price": price,
         "price_date": fundamentals.get("price_date"),
         "data_fetched_at_utc": fundamentals.get("fetched_at_utc"),
@@ -209,7 +212,7 @@ def value_ticker(
     }
 
     dcf_results: dict[str, float] = {}
-    if valuation_fcf is not None and valuation_fcf > 0 and shares is not None and shares > 0:
+    if not currency_mismatch and valuation_fcf is not None and valuation_fcf > 0 and shares is not None and shares > 0:
         for scenario, config in cfg["scenarios"].items():
             try:
                 result = dcf_valuation(
@@ -232,7 +235,7 @@ def value_ticker(
                 row["dcf_view"] = _price_view(price, row["dcf_buy_below"], row["dcf_sell_review_above"])
 
     pe_results: dict[str, float] = {}
-    if forward_eps is not None and forward_eps > 0:
+    if not currency_mismatch and forward_eps is not None and forward_eps > 0:
         for scenario, config in cfg["scenarios"].items():
             try:
                 result = pe_valuation(forward_eps=forward_eps, fair_pe=config["fair_pe"])
@@ -249,6 +252,11 @@ def value_ticker(
 
     confidence = "medium"
     limitations: list[str] = []
+    if currency_mismatch:
+        limitations.append(
+            f"报价币种 {fundamentals.get('currency')} 与财务报表币种 {fundamentals.get('financial_currency')} 不一致，未进行货币换算；DCF/PE 已暂停。"
+        )
+        confidence = "low"
     if price is None or price <= 0:
         limitations.append("当前股价缺失，不能判断价格所处区间。")
         confidence = "low"
