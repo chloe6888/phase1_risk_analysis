@@ -219,10 +219,12 @@ def start_task(command: Sequence[str], repository_root: Path = ROOT) -> dict[str
                 start_new_session=True,
                 close_fds=True,
             )
-        status["pid"] = int(process.pid)
-        status["message"] = "后台研究进程已启动。"
-        atomic_write_json(status_path, status)
-        return status
+        latest_status = read_json(status_path) or status
+        latest_status["pid"] = int(process.pid)
+        if latest_status.get("state") == "queued":
+            latest_status["message"] = "后台研究进程已启动。"
+        atomic_write_json(status_path, latest_status)
+        return latest_status
     except Exception:
         raise
     finally:
