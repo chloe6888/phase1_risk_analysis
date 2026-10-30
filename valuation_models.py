@@ -2,8 +2,11 @@
 """Transparent DCF and forward-PE valuation models.
 
 All assumptions are explicit inputs. This module does not predict future prices.
-DCF uses a five-year constant-growth forecast followed by a Gordon-growth
-terminal value. PE valuation applies an explicitly configured multiple to EPS.
+DCF uses a five-year equity-cash-flow proxy forecast followed by a Gordon-growth
+terminal value. Yahoo's CFO-less-CapEx FCF is not a fully reconciled FCFE series,
+so this is an indicative proxy; the discount rate is an editable cost-of-equity
+assumption and cash/debt are not added or subtracted again. PE valuation applies
+an explicitly configured multiple to EPS.
 """
 from __future__ import annotations
 
@@ -32,38 +35,30 @@ def dcf_valuation(
     *,
     free_cash_flow: float,
     diluted_shares: float,
-    cash: float,
-    debt: float,
     annual_growth: float,
-    discount_rate: float,
+    cost_of_equity: float,
     terminal_growth: float,
     forecast_years: int = 5,
 ) -> dict[str, float]:
     """Return FCFF-based enterprise/equity value and per-share intrinsic value.
 
-    Cash flow and balance-sheet amounts must use the same currency and units.
-    The cash-flow input should be unlevered FCF. Yahoo's reported freeCashflow is
-    a vendor field and may not be identical to audited unlevered FCFF.
+    The cash-flow input is treated as an equity-cash-flow proxy. Yahoo's reported
+    CFO-less-CapEx FCF is not fully reconciled FCFE; discount at cost of equity and
+    do not add cash or subtract debt again. Treat the result as indicative only.
     """
     fcf0 = _required_positive(free_cash_flow, "free_cash_flow")
     shares = _required_positive(diluted_shares, "diluted_shares")
-    cash_value = finite_number(cash)
-    debt_value = finite_number(debt)
-    if cash_value is None or cash_value < 0:
-        raise ValueError("cash must be a finite non-negative number.")
-    if debt_value is None or debt_value < 0:
-        raise ValueError("debt must be a finite non-negative number.")
-    growth = finite_number(annual_growth)
-    wacc = finite_number(discount_rate)
+     growth = finite_number(annual_growth)
+    cost = finite_number(cost_of_equity)
     terminal = finite_number(terminal_growth)
     if growth is None or not -0.75 <= growth <= 1.0:
         raise ValueError("annual_growth must be between -75% and 100%.")
-    if wacc is None or not 0 < wacc <= 0.5:
-        raise ValueError("discount_rate must be greater than 0% and at most 50%.")
+    if cost is None or not 0 < cost <= 0.5:
+        raise ValueError("cost_of_equity must be greater than 0% and at most 50%.")
     if terminal is None or not -0.05 <= terminal <= 0.10:
         raise ValueError("terminal_growth must be between -5% and 10%.")
-    if wacc <= terminal:
-        raise ValueError("discount_rate must be greater than terminal_growth.")
+    if cost <= terminal:
+        raise ValueError("cost_of_equity must be greater than terminal_growth.")
     if isinstance(forecast_years, bool) or not isinstance(forecast_years, int) or not 1 <= forecast_years <= 20:
         raise ValueError("forecast_years must be an integer between 1 and 20.")
 
@@ -72,15 +67,13 @@ def dcf_valuation(
     for year in range(1, forecast_years + 1):
         projected_fcf = fcf0 * ((1.0 + growth) ** year)
         projected.append(projected_fcf)
-        present_values.append(projected_fcf / ((1.0 + wacc) ** year))
+        present_values.append(projected_fcf / ((1.0 + cost) ** year))
 
-    terminal_value = projected[-1] * (1.0 + terminal) / (wacc - terminal)
-    pv_terminal = terminal_value / ((1.0 + wacc) ** forecast_years)
+    terminal_value = projected[-1] * (1.0 + terminal) / (cost - terminal)
+    pv_terminal = terminal_value / ((1.0 + cost) ** forecast_years)
     pv_explicit = sum(present_values)
-    enterprise_value = pv_explicit + pv_terminal
-    equity_value = enterprise_value + cash_value - debt_value
+    equity_value = pv_explicit + pv_terminal
     return {
-        "enterprise_value": enterprise_value,
         "equity_value": equity_value,
         "intrinsic_value_per_share": equity_value / shares,
         "present_value_explicit_period": pv_explicit,
@@ -132,20 +125,20 @@ def validate_assumptions(config: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(row, Mapping):
             raise ValueError(f"Missing {scenario} valuation assumptions.")
         growth = finite_number(row.get("fcf_growth"))
-        wacc = finite_number(row.get("discount_rate"))
+        cost = finite_number(row.get("cost_of_equity"))
         terminal = finite_number(row.get("terminal_growth"))
         pe = finite_number(row.get("fair_pe"))
         if growth is None or not -0.75 <= growth <= 1.0:
             raise ValueError(f"{scenario}.fcf_growth must be between -75% and 100%.")
-        if wacc is None or not 0 < wacc <= 0.5:
-            raise ValueError(f"{scenario}.discount_rate must be greater than 0% and at most 50%.")
-        if terminal is None or not -0.05 <= terminal <= 0.10 or wacc <= terminal:
-            raise ValueError(f"{scenario}.terminal_growth must be between -5% and 10% and below discount_rate.")
+        if cost is None or not 0 < cost <= 0.5:
+            raise ValueError(f"{scenario}.cost_of_equity must be greater than 0% and at most 50%.")
+        if terminal is None or not -0.05 <= terminal <= 0.10 or cost <= terminal:
+            raise ValueError(f"{scenario}.terminal_growth must be between -5% and 10% and below cost_of_equity.")
         if pe is None or not 1 <= pe <= 100:
             raise ValueError(f"{scenario}.fair_pe must be between 1 and 100.")
         normalized["scenarios"][scenario] = {
             "fcf_growth": growth,
-            "discount_rate": wacc,
+            "cost_of_equity": cost,
             "terminal_growth": terminal,
             "fair_pe": pe,
         }
@@ -214,16 +207,14 @@ def value_ticker(
     }
 
     dcf_results: dict[str, float] = {}
-    if valuation_fcf is not None and valuation_fcf > 0 and shares is not None and shares > 0 and cash is not None and debt is not None:
+    if valuation_fcf is not None and valuation_fcf > 0 and shares is not None and shares > 0:
         for scenario, config in cfg["scenarios"].items():
             try:
                 result = dcf_valuation(
                     free_cash_flow=valuation_fcf,
                     diluted_shares=shares,
-                    cash=cash,
-                    debt=debt,
                     annual_growth=config["fcf_growth"],
-                    discount_rate=config["discount_rate"],
+                    cost_of_equity=config["cost_of_equity"],
                     terminal_growth=config["terminal_growth"],
                     forecast_years=cfg["forecast_years"],
                 )
@@ -265,8 +256,8 @@ def value_ticker(
     if valuation_fcf is None or valuation_fcf <= 0:
         limitations.append("缺少正数自由现金流，DCF 估值不可用。")
         confidence = "low"
-    if shares is None or shares <= 0 or cash is None or debt is None:
-        limitations.append("股数、现金或债务字段不完整，DCF 估值不可用。")
+    if shares is None or shares <= 0:
+        limitations.append("缺少有效股数，DCF 估值不可用。")
         confidence = "low"
     if cfg["cyclical"]:
         limitations.append("周期行业：单年自由现金流和盈利可能处于周期高点或低点，应优先审查正常化 FCF/EPS。")
