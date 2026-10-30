@@ -280,9 +280,20 @@ bash start_dashboard.sh
 
 # Windows PowerShell
 .\start_dashboard.ps1
+
+# GitHub Codespaces（在已安装 requirements-dashboard.txt 的环境中）
+python -m streamlit run dashboard.py --server.address 0.0.0.0 --server.port 8501
 ```
 
-仪表盘从 `outputs/` 读取已有结果；可在侧边栏上传个人持仓 CSV，文件会保存在已忽略的 `data/private/` 文件夹。勾选“使用导入持仓自动计算组合权重”后即可启动完整研究流程，也可手工填写权重。它默认仅用于本机交互，不执行真实交易，也不会因为打开页面就自动下载行情。请不要将本地服务直接暴露到公网；若需要多人或公网访问，必须先部署身份认证、授权与数据隔离。
+Codespaces 启动后，在底部 Ports 面板打开 8501 端口。建议端口可见性保持 Private。启动脚本优先使用项目已有的 `.venv`，否则使用当前 Python 环境；仅在 Streamlit 缺失时安装可选依赖。
+
+仪表盘侧边栏只保留持仓导入和常用运行入口，高级回测参数折叠在“高级研究设置”中。提交研究后由独立后台工作进程执行，页面不再同步等待整个研究流程；同一时刻只允许一个研究任务。任务状态和日志分别写入 `outputs/runs/<task_id>/status.json` 与 `worker.log`。
+
+每次运行的研究产物写入独立的 `outputs/runs/<task_id>/artifacts/`。只有当进程成功退出且同时生成 `research_report.md` 和 `research_run_manifest.json` 后，才原子更新 `outputs/latest_success.json`。运行失败或进程意外退出时，上一次完整成功的报告仍然可用；仪表盘从该指针读取结果。首次部署时，如果还没有成功运行记录，会兼容读取旧版 `outputs/` 根目录下的结果。
+
+可在侧边栏上传个人持仓 CSV，文件会保存在已忽略的 `data/private/` 文件夹。勾选“根据导入持仓自动计算组合权重”后即可按持仓运行，也可手工输入权重。请确认股数与券商记录一致，并注意没有导入的现金、融资负债和其他资产不会自动纳入组合权重。
+
+此平台只用于研究，不连接券商、不发送真实订单。请不要将包含个人财务数据的服务公开部署到互联网；若需多人或公网访问，必须先增加身份认证、授权与数据隔离。
 
 ## 滚动 Walk-forward 验证
 
