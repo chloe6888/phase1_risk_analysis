@@ -393,12 +393,14 @@ def render_task_monitor() -> None:
 
             state = str(task.get("state", "unknown"))
             task_id = str(task.get("task_id", "unknown"))
+            task_type = str(task.get("task_type", "research"))
+            task_label = "个股估值" if task_type == "valuation" else "组合研究"
             step = _task_step_label(str(task.get("current_step") or "后台准备中"))
             message = str(task.get("message") or "")
             created = str(task.get("created_at") or "")
 
             if state in {"queued", "running"}:
-                st.info("研究正在后台运行。你可以继续浏览页面；上一次完整成功的报告会保留。")
+                st.info(f"{task_label}任务正在后台运行。你可以继续浏览页面；上一次成功结果会保留。")
                 st.write(f"**当前进度：** {step}")
                 raw_step = str(task.get("current_step") or "")
                 try:
@@ -407,14 +409,14 @@ def render_task_monitor() -> None:
                 except (ValueError, ZeroDivisionError):
                     st.progress(0.05, text="后台进程启动中")
             elif state == "succeeded":
-                st.success("最近一次研究已成功完成，新的完整报告已经发布。")
+                st.success(f"最近一次{task_label}已成功完成，新的完整结果已经发布。")
                 st.caption(f"完成时间（UTC）：{task.get('finished_at', '暂无记录')}")
                 loaded = st.session_state.get("loaded_task_id")
                 if loaded != task_id:
                     st.session_state["loaded_task_id"] = task_id
                     st.rerun()
             elif state == "failed":
-                st.error("本次研究未能完成。请展开运行日志查看原因；上一次成功报告不会被覆盖。")
+                st.error(f"本次{task_label}未能完成。请展开运行日志查看原因；上一次成功结果不会被覆盖。")
                 if message:
                     st.caption(message)
             else:
@@ -425,6 +427,144 @@ def render_task_monitor() -> None:
                 st.code(get_task_log(task_id, ROOT), language="text")
 
     _monitor()
+
+
+
+
+VALUATION_COLUMN_LABELS = {
+    "ticker": "股票代码", "company_name": "公司名称", "currency": "报价币种",
+    "current_price": "估值参考价", "price_date": "报价日期",
+    "dcf_bear": "DCF 悲观情景", "dcf_base": "DCF 基准情景", "dcf_bull": "DCF 乐观情景",
+    "pe_bear": "PE 悲观情景", "pe_base": "PE 基准情景", "pe_bull": "PE 乐观情景",
+    "dcf_buy_below": "DCF 买入观察线", "pe_buy_below": "PE 买入观察线",
+    "dcf_sell_review_above": "DCF 卖出复核线", "pe_sell_review_above": "PE 卖出复核线",
+    "dcf_view": "DCF 价格区间判断", "pe_view": "PE 价格区间判断",
+    "overall_confidence": "估值可信度", "data_quality": "数据完整度",
+    "limitations": "估值限制与待核对事项", "forward_eps": "远期每股收益",
+    "free_cash_flow": "报告自由现金流", "valuation_fcf": "估值使用自由现金流",
+    "fcf_basis": "自由现金流口径", "diluted_shares": "稀释后股数",
+    "market_cap": "总市值", "revenue": "营收", "gross_profit": "毛利",
+    "operating_income": "营业利润", "net_income": "净利润", "ebitda": "EBITDA",
+    "revenue_growth_yoy": "营收同比", "gross_margin": "毛利率",
+    "operating_margin": "营业利润率", "net_margin": "净利率",
+    "return_on_equity": "ROE", "return_on_assets": "ROA",
+    "trailing_pe": "TTM 市盈率", "forward_pe": "远期市盈率",
+    "financial_period": "财务数据期间", "data_source": "数据来源",
+    "assumption_source": "估值假设来源", "stale_data": "是否使用过期缓存",
+}
+VALUATION_VALUE_LABELS = {
+    "below_buy_threshold": "低于买入观察线",
+    "above_sell_review_threshold": "高于卖出复核线",
+    "between_thresholds": "处于两条观察线之间",
+    "unavailable": "暂不可计算",
+    "low": "低", "medium": "中", "high": "高",
+    "complete_vendor_snapshot": "数据源快照字段较完整",
+    "unverified_vendor_snapshot": "数据源口径尚未验证",
+    "partial_vendor_snapshot": "数据源快照字段不完整",
+    "fetch_failed": "数据获取失败",
+    "reported_fcf": "数据源报告自由现金流",
+    "user_normalized_fcf": "人工输入的正常化自由现金流",
+}
+
+
+def _valuation_display_frame(frame: pd.DataFrame | None) -> pd.DataFrame | None:
+    if frame is None:
+        return None
+    result = frame.copy()
+    result = result.rename(columns={
+        key: value for key, value in VALUATION_COLUMN_LABELS.items() if key in result.columns
+    })
+    for column in ("DCF 价格区间判断", "PE 价格区间判断", "估值可信度", "数据完整度", "自由现金流口径"):
+        if column in result.columns:
+            result[column] = result[column].replace(VALUATION_VALUE_LABELS)
+    if "是否使用过期缓存" in result.columns:
+        result["是否使用过期缓存"] = result["是否使用过期缓存"].map(
+            lambda value: "是" if bool(value) else "否"
+        )
+    return result
+
+
+def _holdings_match_snapshot(imported: pd.DataFrame | None, analyzed: pd.DataFrame | None) -> bool:
+    """Only show analyzed market values as current when ticker and share counts still match."""
+    if imported is None or analyzed is None or imported.empty or analyzed.empty:
+        return False
+    required = {"ticker", "shares"}
+    if not required.issubset(imported.columns) or not required.issubset(analyzed.columns):
+        return False
+    left = imported[["ticker", "shares"]].copy()
+    right = analyzed[["ticker", "shares"]].copy()
+    left["ticker"] = left["ticker"].astype(str).str.upper()
+    right["ticker"] = right["ticker"].astype(str).str.upper()
+    left = left.sort_values("ticker").reset_index(drop=True)
+    right = right.sort_values("ticker").reset_index(drop=True)
+    if left["ticker"].tolist() != right["ticker"].tolist():
+        return False
+    lhs = pd.to_numeric(left["shares"], errors="coerce").to_numpy(dtype=float)
+    rhs = pd.to_numeric(right["shares"], errors="coerce").to_numpy(dtype=float)
+    return bool(pd.notna(lhs).all() and pd.notna(rhs).all() and (abs(lhs - rhs) <= 1e-8).all())
+
+
+def _build_decision_review(
+    holdings: pd.DataFrame | None,
+    valuation: pd.DataFrame | None,
+) -> pd.DataFrame | None:
+    """Combine scenario values and portfolio snapshot rows without creating a trade signal."""
+    if valuation is None or valuation.empty:
+        return None
+    valuation_columns = [
+        name for name in (
+            "ticker", "company_name", "currency", "current_price", "price_date",
+            "dcf_base", "pe_base", "dcf_buy_below", "pe_buy_below",
+            "dcf_sell_review_above", "pe_sell_review_above", "dcf_view", "pe_view",
+            "overall_confidence", "data_quality", "limitations",
+        ) if name in valuation.columns
+    ]
+    values = valuation[valuation_columns].copy().rename(columns={
+        "ticker": "股票代码", "company_name": "公司名称", "currency": "估值币种",
+        "current_price": "估值参考价", "price_date": "报价日期",
+        "dcf_base": "DCF 基准情景", "pe_base": "PE 基准情景",
+        "dcf_buy_below": "DCF 买入观察线", "pe_buy_below": "PE 买入观察线",
+        "dcf_sell_review_above": "DCF 卖出复核线", "pe_sell_review_above": "PE 卖出复核线",
+        "dcf_view": "DCF 区间判断", "pe_view": "PE 区间判断",
+        "overall_confidence": "估值可信度", "data_quality": "数据完整度",
+        "limitations": "估值限制与待核对事项",
+    })
+    if holdings is not None and not holdings.empty and "ticker" in holdings.columns:
+        holding_columns = [
+            name for name in ("ticker", "shares", "average_cost", "snapshot_price", "market_value", "weight_pct", "currency")
+            if name in holdings.columns
+        ]
+        held = holdings[holding_columns].copy().rename(columns={
+            "ticker": "股票代码", "shares": "持股数量", "average_cost": "平均成本",
+            "snapshot_price": "持仓文件参考价", "market_value": "持仓快照市值",
+            "weight_pct": "持仓快照占比", "currency": "持仓币种",
+        })
+        values = values.merge(held, on="股票代码", how="outer")
+    else:
+        values["持股数量"] = pd.NA
+    if "持股数量" in values.columns:
+        values["持仓状态"] = values["持股数量"].notna().map({True: "当前持仓", False: "观察标的"})
+    ordered = [
+        "持仓状态", "股票代码", "公司名称", "估值币种", "估值参考价", "报价日期",
+        "持股数量", "平均成本", "持仓文件参考价", "持仓快照市值", "持仓快照占比",
+        "DCF 基准情景", "PE 基准情景", "DCF 买入观察线", "PE 买入观察线",
+        "DCF 卖出复核线", "PE 卖出复核线", "DCF 区间判断", "PE 区间判断",
+        "估值可信度", "数据完整度", "估值限制与待核对事项",
+    ]
+    return values[[name for name in ordered if name in values.columns]]
+
+
+def _risk_exposure_frame(positions: pd.DataFrame, column: str, label: str) -> pd.DataFrame:
+    if positions.empty or column not in positions.columns or "market_value" not in positions.columns:
+        return pd.DataFrame(columns=[label, "持仓占比"])
+    grouped = positions.groupby(column, dropna=False)["market_value"].sum()
+    total = float(positions["market_value"].sum())
+    if total <= 0:
+        return pd.DataFrame(columns=[label, "持仓占比"])
+    return pd.DataFrame({
+        label: grouped.index.astype(str),
+        "持仓占比": grouped.to_numpy(dtype=float) / total * 100.0,
+    }).sort_values("持仓占比", ascending=False)
 
 
 def main() -> None:
@@ -552,6 +692,9 @@ def main() -> None:
     memory = read_json(output_dir / "memory_allocation_summary.json")
     memory_positions = read_csv(output_dir / "memory_position_diagnostics.csv")
     memory_decisions = read_csv(output_dir / "memory_allocation_scenarios.csv")
+    latest_holdings = read_csv(output_dir / "holdings_valuation.csv")
+    valuation_output_dir = active_output_dir(ROOT, task_type="valuation")
+    valuation_summary = read_csv(valuation_output_dir / "valuation_summary.csv")
 
     if data_meta:
         dates = data_meta.get("data_last_dates", {})
@@ -564,21 +707,43 @@ def main() -> None:
         st.info("当前还没有研究结果。请在上方导入持仓或填写组合权重，然后点击“开始研究”。首次下载行情需要网络。")
 
     imported_positions = None
+    imported_summary = None
     imported_alerts = []
     if PRIVATE_HOLDINGS_PATH.is_file():
         try:
             imported_snapshot = load_holdings(PRIVATE_HOLDINGS_PATH)
-            imported_positions, _imported_summary = summarize_holdings(imported_snapshot)
+            imported_positions, imported_summary = summarize_holdings(imported_snapshot)
             imported_alerts = risk_guardrail_alerts(imported_positions)
         except Exception as exc:
             st.error(f"本地持仓文件无法解析：{exc}")
 
-    overview_tab, risk_tab, backtest_tab, validation_tab, memory_tab, files_tab = st.tabs(
-        ["账户概览", "组合风险", "策略回测", "稳健性检验", "存储主题", "研究报告与文件"]
+    overview_tab, decision_tab, risk_tab, backtest_tab, validation_tab, memory_tab, valuation_tab, files_tab = st.tabs(
+        ["账户概览", "投资决策复核", "组合风险", "策略回测", "稳健性检验", "存储主题", "个股估值", "研究报告与文件"]
     )
 
     with overview_tab:
         st.subheader("账户概览")
+        st.markdown("### 当前风险重点")
+        if imported_summary is not None:
+            summary_cols = st.columns(4)
+            summary_cols[0].metric("导入持仓市值", f"{imported_summary['market_value']:,.2f} {imported_summary['currency']}", help="按持仓文件中的参考价计算；不代表实时账户净资产。")
+            summary_cols[1].metric("最大单一持仓", f"{imported_summary['largest_position_ticker']} · {imported_summary['largest_position_weight_pct']:.1f}%")
+            summary_cols[2].metric("最大风险主题", f"{imported_summary['largest_risk_group']} · {imported_summary['largest_risk_group_weight_pct']:.1f}%")
+            summary_cols[3].metric("集中度提醒", f"{len(imported_alerts)} 项")
+            if imported_alerts:
+                for alert in imported_alerts[:4]:
+                    st.warning(f"{alert['name']}：持仓占比 {float(alert['weight_pct']):.1f}%，高于默认复核阈值 {float(alert['threshold_pct']):.1f}%。")
+                if len(imported_alerts) > 4:
+                    st.caption(f"另有 {len(imported_alerts) - 4} 项提醒，详见投资决策复核页。")
+            else:
+                st.info("按当前导入持仓和默认集中度阈值，暂未触发单一持仓、风险主题或行业集中度提醒。")
+        else:
+            st.info("尚未导入持仓快照。可以先上传 CSV，或只用组合权重运行历史风险研究。")
+        if portfolio:
+            risk_snapshot_cols = st.columns(3)
+            risk_snapshot_cols[0].metric("历史最大回撤", _pct(portfolio.get("max_drawdown")), help="历史区间中从高点到随后低点的最大跌幅，不是未来损失上限。")
+            risk_snapshot_cols[1].metric("年化波动率", _pct(portfolio.get("annualized_volatility")))
+            risk_snapshot_cols[2].metric("历史有效观测", f"{portfolio.get('observations', 0)} 个交易日")
         if portfolio:
             metric_cols = st.columns(4)
             metric_cols[0].metric("区间累计收益", _pct(portfolio.get("total_return")), help="研究区间内组合净值的累计变化，不代表未来收益。")
@@ -626,6 +791,50 @@ def main() -> None:
             st.write("2. 首次运行需要联网下载历史行情。")
             st.write("3. 运行完成后，查看账户概览、组合风险和策略回测。")
 
+    with decision_tab:
+        st.subheader("投资决策复核")
+        st.caption("把当前持仓、估值情景和仓位风险放在一起核对。这里提供研究依据与复核条件，不生成自动买卖指令。")
+        same_holdings = _holdings_match_snapshot(imported_positions, latest_holdings)
+        review_holdings = latest_holdings if same_holdings else imported_positions
+        if imported_positions is not None and latest_holdings is not None and not same_holdings:
+            st.warning("最近一次组合研究使用的股票代码或持股数量与当前导入文件不一致。本页不会把旧研究的市值和权重冒充为当前持仓；请重新运行组合研究后再核对。")
+        if imported_positions is not None:
+            if imported_alerts:
+                st.markdown("### 当前持仓的集中度复核")
+                for alert in imported_alerts:
+                    st.warning(f"{alert['name']}：占导入股票/ETF持仓 {float(alert['weight_pct']):.1f}%，高于默认复核阈值 {float(alert['threshold_pct']):.1f}%。")
+            else:
+                st.info("当前导入持仓未触发默认集中度阈值。该结论只覆盖导入的股票/ETF，不包含未导入的现金、债券、其他账户和融资负债。")
+            if review_holdings is not None:
+                st.markdown("### 持仓与成本参考")
+                st.caption("若与当前导入股数一致，下表采用最近一次研究分析的历史收盘价估值；否则只显示导入文件中的截图参考价。")
+                cols = ["ticker", "name", "shares", "average_cost", "reference_price", "snapshot_price", "market_value", "unrealized_pnl", "unrealized_return_pct", "weight_pct"]
+                present = [name for name in cols if name in review_holdings.columns]
+                st.dataframe(_display_frame(review_holdings[present]), hide_index=True, use_container_width=True)
+        if valuation_summary is not None and not valuation_summary.empty:
+            st.markdown("### 估值与持仓交叉核对")
+            review = _build_decision_review(review_holdings, valuation_summary)
+            if review is not None:
+                st.dataframe(review, hide_index=True, use_container_width=True)
+            st.caption("DCF/PE 基准值和观察线来自人工可编辑假设。低于观察线不等于应该买入；还要核对增长质量、周期位置、币种和数据日期。")
+            if "limitations" in valuation_summary.columns:
+                with st.expander("查看估值限制与数据质量说明"):
+                    for _, row in valuation_summary.iterrows():
+                        limit = str(row.get("limitations") or "")
+                        if limit:
+                            st.warning(f"{row.get('ticker', '未知标的')}：{limit}")
+        else:
+            st.info("尚无个股估值结果。可在“个股估值”页运行 DCF 与远期 PE 情景分析，完成后会自动出现在本页。")
+        if memory:
+            st.markdown("### 存储主题风险预算")
+            memory_cols = st.columns(3)
+            memory_cols[0].metric("主题当前占比", _pct(float(memory.get("memory_sleeve_weight_pct", 0.0)) / 100.0))
+            memory_cols[1].metric("主题预算上限", _pct(float(memory.get("max_memory_weight_pct", 0.0)) / 100.0))
+            memory_cols[2].metric("规则判断", VALUE_LABELS.get(str(memory.get("overall_action")), str(memory.get("overall_action", "暂无数据"))))
+            st.write(_memory_overall_reason(memory))
+            st.warning(_memory_denominator_note(str(memory.get("denominator_warning", ""))))
+        st.warning("任何价格观察线都依赖模型和假设；执行前需人工核验财报、最新报价、汇率、持仓数量、交易成本及账户总净资产。")
+
     with risk_tab:
         st.subheader("组合风险")
         st.caption("这一页回答三个问题：风险主要来自哪里、组合历史上经历过多大回撤、在假设冲击下可能受到多大影响。")
@@ -647,6 +856,19 @@ def main() -> None:
                 {"指标": "历史尾部平均损失（CVaR）", "数值": _pct(portfolio.get("historical_cvar_one_period"))},
             ])
             st.dataframe(risk_table, hide_index=True, use_container_width=True)
+        if imported_positions is not None and not imported_positions.empty:
+            st.markdown("### 持仓结构与集中度")
+            group_frame = _risk_exposure_frame(imported_positions, "risk_group", "风险主题")
+            subgroup_frame = _risk_exposure_frame(imported_positions, "subgroup", "行业分类")
+            left_group, right_group = st.columns(2)
+            with left_group:
+                st.caption("按风险主题划分（基于导入持仓参考价）")
+                if not group_frame.empty:
+                    st.bar_chart(group_frame.set_index("风险主题"))
+            with right_group:
+                st.caption("按行业分类划分（基于导入持仓参考价）")
+                if not subgroup_frame.empty:
+                    st.bar_chart(subgroup_frame.set_index("行业分类"))
         contributions = read_csv(output_dir / "portfolio_risk_contributions.csv")
         if contributions is not None:
             st.markdown("### 各持仓对组合波动的贡献")
@@ -742,6 +964,98 @@ def main() -> None:
         if grid is None and folds is None and validation is None and walk is None:
             st.info("目前还没有稳健性检验结果。完成一次研究后，这里会展示参数比较和滚动样本外结果。")
 
+    with valuation_tab:
+        st.subheader("个股基本面估值")
+        st.caption("用 DCF（现金流折现）与远期 PE（市盈率）做情景交叉检查。默认假设是可修改的研究起点，不是市场一致预期或公司指引。")
+        valuation_symbols = st.multiselect(
+            "选择需要研究的股票",
+            options=["GOOG", "NVDA", "MU", "SKHY"],
+            default=["GOOG", "NVDA", "MU", "SKHY"],
+            key="valuation_symbols",
+        )
+        force_valuation_refresh = st.checkbox(
+            "强制刷新财务与行情数据",
+            value=False,
+            key="force_valuation_refresh",
+            help="默认优先使用最近 7 天的本地数据缓存；缓存价格日期仍需核对。",
+        )
+        if st.button("运行估值分析", type="primary", disabled=not valuation_symbols, key="run_valuation"):
+            command = [sys.executable, str(ROOT / "run_valuation.py"), "--tickers", ",".join(valuation_symbols)]
+            if force_valuation_refresh:
+                command.append("--refresh")
+            try:
+                task = start_task(command, repository_root=ROOT, task_type="valuation")
+                st.success(f"估值任务已提交（编号：{task['task_id']}）。后台完成后会发布独立估值结果。")
+                st.rerun()
+            except TaskAlreadyRunning as exc:
+                st.warning(str(exc))
+            except Exception as exc:
+                st.error(f"无法启动估值任务：{type(exc).__name__}: {exc}")
+
+        valuation_status_names = [
+            "valuation_summary.csv", "valuation_report.md", "valuation_fundamentals.json",
+            "valuation_assumptions_used.json", "valuation_run_manifest.json",
+        ]
+        st.markdown("### 估值结果状态")
+        st.dataframe(pd.DataFrame([
+            {"结果文件": name, "状态": "已生成" if (valuation_output_dir / name).is_file() else "尚未生成"}
+            for name in valuation_status_names
+        ]), hide_index=True, use_container_width=True)
+        if valuation_summary is not None and not valuation_summary.empty:
+            st.markdown("### 各股票估值情景对照")
+            preferred = [
+                "ticker", "current_price", "currency", "price_date", "dcf_bear", "dcf_base", "dcf_bull",
+                "pe_bear", "pe_base", "pe_bull", "dcf_buy_below", "pe_buy_below",
+                "dcf_sell_review_above", "pe_sell_review_above", "dcf_view", "pe_view",
+                "overall_confidence", "data_quality",
+            ]
+            shown = [name for name in preferred if name in valuation_summary.columns]
+            st.dataframe(_valuation_display_frame(valuation_summary[shown]), hide_index=True, use_container_width=True)
+            st.caption("报价和估值数字使用各证券对应的交易币种。买入观察线和卖出复核线不是交易指令。")
+            financial_columns = [
+                "ticker", "revenue", "gross_profit", "operating_income", "net_income", "ebitda",
+                "revenue_growth_yoy", "gross_margin", "operating_margin", "net_margin",
+                "return_on_equity", "return_on_assets", "trailing_pe", "forward_pe",
+            ]
+            available_financial_columns = [name for name in financial_columns if name in valuation_summary.columns]
+            if available_financial_columns:
+                st.markdown("### 经营与盈利质量")
+                financial_view = valuation_summary[available_financial_columns].copy()
+                percent_columns = ["revenue_growth_yoy", "gross_margin", "operating_margin", "net_margin", "return_on_equity", "return_on_assets"]
+                for column in percent_columns:
+                    if column in financial_view.columns:
+                        financial_view[column] = pd.to_numeric(financial_view[column], errors="coerce").map(
+                            lambda value: f"{value:.1%}" if pd.notna(value) else "暂无数据"
+                        )
+                financial_view = _valuation_display_frame(financial_view)
+                st.dataframe(financial_view, hide_index=True, use_container_width=True)
+
+            selected_report = st.selectbox(
+                "查看单只股票的数据质量与估值限制",
+                options=valuation_summary["ticker"].astype(str).tolist(),
+                key="valuation_report_ticker",
+            )
+            selected_row = valuation_summary[valuation_summary["ticker"].astype(str) == selected_report].iloc[0]
+            st.markdown(f"### {selected_report} · 数据质量与估值限制")
+            st.write(
+                f"数据来源：{selected_row.get('data_source', '暂无记录')} · "
+                f"报价日期：{selected_row.get('price_date', '暂无记录')} · "
+                f"财务期间：{selected_row.get('financial_period', '暂无记录')} · "
+                f"可信度：{VALUATION_VALUE_LABELS.get(str(selected_row.get('overall_confidence', 'low')), '低')}"
+            )
+            st.warning(str(selected_row.get("limitations", "估值依赖输入假设，请核验数据。")))
+            valuation_report_path = valuation_output_dir / "valuation_report.md"
+            if valuation_report_path.is_file():
+                with st.expander("查看完整估值研究报告"):
+                    st.markdown(valuation_report_path.read_text(encoding="utf-8"))
+        else:
+            st.info("还没有估值结果。选择 GOOG、NVDA、MU 或 SKHY，点击“运行估值分析”开始。")
+
+        with st.expander("估值模型假设与修改方式"):
+            st.code("config/valuation_assumptions.json", language="text")
+            st.caption("可编辑熊市/基准/牛市的现金流增长率、股权资本成本、终值增长率、合理 PE 倍数和安全边际。修改后重新运行估值。")
+            st.warning("MU 属于周期股，需优先审查跨周期正常化现金流；SKHY 的 ADR 每股口径未完成核验时，系统会暂停相应每股估值。")
+
     with memory_tab:
         st.subheader("存储主题持仓分析")
         st.caption("检查 MU、SKHY 与 DRAM 之间的重叠敞口，避免直接持股和 ETF 间接持股叠加后过度集中。")
@@ -803,6 +1117,18 @@ def main() -> None:
         with st.expander("查看本地结果文件位置"):
             st.code(str(output_dir), language="text")
             st.caption("个人持仓原始文件保存在 data/private/，研究结果保存在 outputs/ 或对应的独立运行目录。")
+        valuation_files = pd.DataFrame([
+            {"文件用途": label, "生成状态": "已生成" if (valuation_output_dir / name).is_file() else "尚未生成"}
+            for name, label in {
+                "valuation_summary.csv": "个股估值汇总",
+                "valuation_report.md": "个股估值报告",
+                "valuation_fundamentals.json": "估值财务原始快照",
+                "valuation_assumptions_used.json": "本次使用的估值假设",
+                "valuation_run_manifest.json": "估值运行记录",
+            }.items()
+        ])
+        st.markdown("### 个股估值结果文件")
+        st.dataframe(valuation_files, hide_index=True, use_container_width=True)
         st.caption("此平台仅用于投资研究，不连接券商、不发送真实订单。公开部署前必须设置身份认证和访问控制。")
 
 
