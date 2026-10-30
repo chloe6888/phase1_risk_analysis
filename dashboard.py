@@ -141,6 +141,22 @@ COLUMN_LABELS = {
     "unrealized_pnl": "浮动盈亏",
     "unrealized_return_pct": "浮动收益率",
     "weight_pct": "持仓占比",
+    "weight_of_reference_portfolio_pct": "参考组合权重",
+    "dram_lookthrough_additional_value": "DRAM 穿透增加金额",
+    "lookthrough_issuer_exposure_value": "穿透发行人敞口金额",
+    "lookthrough_issuer_exposure_pct": "穿透发行人敞口比例",
+    "add_permission": "加仓条件检查",
+    "trend_flag": "趋势状态",
+    "return_20d": "近 20 日收益率",
+    "return_60d": "近 60 日收益率",
+    "annualized_volatility_20d": "近 20 日年化波动率",
+    "scenario_exceeds_memory_limit": "是否超过主题上限",
+    "target_value": "目标持仓金额",
+    "threshold_pct": "复核阈值",
+    "lookback": "回看窗口（交易日）",
+    "skip_recent": "跳过近期窗口（交易日）",
+    "top_n": "持有标的数量",
+    "year": "年份",
     "risk_group": "风险主题",
     "subgroup": "行业分类",
     "scenario": "方案",
@@ -202,6 +218,12 @@ VALUE_LABELS = {
     "cap_only_preserve_etf": "保留 ETF 的最小调整方案",
     "REDUCE_TO_TARGET": "按目标仓位减仓复核",
     "HOLD_NO_AUTO_ADD": "暂不自动加仓",
+    "HOLD": "维持当前股数",
+    "NO_ADD_MEMORY_LIMIT": "存储主题仓位超限，暂不加仓",
+    "WAIT_FOR_MEMORY_HEADROOM": "等待仓位回到安全缓冲区",
+    "NO_ADD_ISSUER_LOOKTHROUGH_LIMIT": "单一发行人穿透敞口超限",
+    "WAIT_FOR_TREND_CONFIRMATION": "等待趋势确认",
+    "POSITIVE_TREND_BUT_SIZE_LIMITS_STILL_APPLY": "趋势转正，但仍受仓位限制",
     "STAGED_ADD_REVIEW_ONLY": "满足条件后再评估加仓",
     "REDUCE_MEMORY_SLEEVE": "存储主题仓位超限",
     "WITHIN_MEMORY_LIMIT": "存储主题仓位在限制内",
@@ -251,10 +273,46 @@ def _display_frame(frame: pd.DataFrame | None) -> pd.DataFrame | None:
         return None
     result = frame.copy()
     result = result.rename(columns={key: value for key, value in COLUMN_LABELS.items() if key in result.columns})
-    for column in ("方案", "建议动作", "验证状态"):
+    for column in ("方案", "建议动作", "验证状态", "加仓条件检查", "趋势状态"):
         if column in result.columns:
             result[column] = result[column].replace(VALUE_LABELS)
+    if "判断依据" in result.columns:
+        result["判断依据"] = result["判断依据"].map(_localized_decision_reason)
+    if "是否超过主题上限" in result.columns:
+        result["是否超过主题上限"] = result["是否超过主题上限"].map(lambda value: "是" if bool(value) else "否")
     return result
+
+
+def _localized_decision_reason(reason: Any) -> str:
+    """Translate fixed explanatory sentences emitted by the memory-allocation model."""
+    value = str(reason or "")
+    if value.startswith("Current ") and " position exceeds this scenario's target weight" in value:
+        ticker = value.split(" ", 2)[1]
+        weight = value.rsplit("(", 1)[-1].rstrip(").")
+        return f"当前 {ticker} 持仓高于此方案目标仓位（{weight}）。"
+    if value.startswith("Below target;"):
+        return "当前仓位低于目标；在满足独立入场条件前，系统不会自动加仓。"
+    if value.startswith("At the rounded target quantity"):
+        return "当前股数已达到此方案按整股取整后的目标数量。"
+    return value
+
+
+def _memory_overall_reason(summary: dict[str, Any]) -> str:
+    current = float(summary.get("memory_sleeve_weight_pct", 0.0))
+    limit = float(summary.get("max_memory_weight_pct", 0.0))
+    excess = float(summary.get("memory_value_above_limit", 0.0))
+    if summary.get("overall_action") == "REDUCE_MEMORY_SLEEVE":
+        return f"MU、SKHY 与 DRAM 合计约占参考组合 {current:.1f}%，高于设定的 {limit:.1f}% 上限；估算超出金额约为 {excess:,.2f}。建议先复核主题仓位和单一发行人敞口。"
+    return f"MU、SKHY 与 DRAM 合计约占参考组合 {current:.1f}%，目前未超过设定的 {limit:.1f}% 上限。仍需关注 ETF 穿透持仓变化和单一发行人集中度。"
+
+
+def _memory_denominator_note(note: str) -> str:
+    value = str(note or "")
+    if value.startswith("Percentages are relative to the full net portfolio equity"):
+        return "本页占比以你提供的账户净资产为分母；请确认该数值已包含现金、其他资产及负债。"
+    if value.startswith("Cash, bonds, other accounts and financing are not included"):
+        return "注意：当前比例仅按导入的股票和 ETF 持仓计算，尚未包含现金、债券、其他账户及融资负债。若要查看整个账户的真实仓位比例，请提供完整净资产。"
+    return value or "组合权重的统计范围尚未记录，请核对持仓文件和账户净资产口径。"
 
 
 def _localized_report(markdown: str) -> str:
@@ -280,6 +338,20 @@ def _localized_report(markdown: str) -> str:
         "- Source:": "- 数据来源：",
         "- Requested dates:": "- 请求数据区间：",
         "- Last date per ticker:": "- 各标的最后数据日期：",
+        "- Period:": "- 统计区间：",
+        "- Return observations:": "- 有效收益观测：",
+        "- Positions:": "- 持仓数量：",
+        "- Latest-price market value:": "- 最近价格估算市值：",
+        "- Reconstructed cost basis:": "- 持仓成本估算：",
+        "- Unrealized P/L at latest available closes:": "- 按最近收盘价估算的浮动盈亏：",
+        "- Largest position:": "- 最大单一持仓：",
+        "- Largest risk group:": "- 最大风险主题：",
+        "- Calculated market value minus broker summary:": "- 持仓估算市值与券商汇总差额：",
+        "- Calculated P/L minus broker summary:": "- 浮动盈亏估算与券商汇总差额：",
+        "- Broker-reported daily P/L (snapshot only):": "- 券商截图显示的当日盈亏：",
+        "- Reconciled within configured tolerance:": "- 是否在设定误差范围内对齐：",
+        "- Successful folds:": "- 成功验证轮次：",
+        "- Out-of-sample observations:": "- 样本外有效观测：",
     }
     result = markdown
     for source, target in replacements.items():
@@ -679,8 +751,8 @@ def main() -> None:
             b.metric("风险预算上限", _pct(float(memory.get("max_memory_weight_pct", 0.0)) / 100.0))
             c.metric("超过上限的金额", _number(memory.get("memory_value_above_limit")))
             d.metric("规则检查结果", VALUE_LABELS.get(str(memory.get("overall_action")), str(memory.get("overall_action", "暂无数据"))))
-            st.write(memory.get("overall_reason", ""))
-            st.warning(memory.get("denominator_warning", ""))
+            st.write(_memory_overall_reason(memory))
+            st.warning(_memory_denominator_note(str(memory.get("denominator_warning", ""))))
             st.caption(
                 f"ETF 穿透持仓假设日期：{memory.get('lookthrough_asof', '暂无')}。ETF 每日持仓可能变化，交易前应重新核对。"
             )
