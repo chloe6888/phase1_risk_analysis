@@ -13,6 +13,7 @@ from typing import Any
 import pandas as pd
 
 from valuation_data import DEFAULT_CACHE_DIR, get_snapshot
+from fundamentals_validation import apply_validation_gates, validate_fundamentals_snapshot
 from valuation_models import value_ticker
 
 ROOT = Path(__file__).resolve().parent
@@ -82,6 +83,12 @@ def make_error_row(symbol: str, message: str) -> dict[str, Any]:
         "dcf_view": "unavailable",
         "pe_view": "unavailable",
         "overall_confidence": "low",
+        "data_validation_status": "BLOCKED",
+        "data_validation_dcf_ready": False,
+        "data_validation_pe_ready": False,
+        "data_validation_quote_age_days": None,
+        "data_validation_financial_age_days": None,
+        "data_validation_findings": message,
         "data_quality": "fetch_failed",
         "limitations": message,
         "error": message,
@@ -168,6 +175,9 @@ def render_report(rows: list[dict[str, Any]], generated_at: str, symbols: list[s
             f"- 财务指标来源：{row.get('financial_metric_sources') or '缺失'}",
             f"- 财务报表期间：{row.get('financial_period') or '未提供'}",
             f"- 数据获取时间：{row.get('data_fetched_at_utc') or '未提供'}",
+            f"- 数据核验：{row.get('data_validation_status') or '未核验'}；DCF 可用：{row.get('data_validation_dcf_ready')}；PE 可用：{row.get('data_validation_pe_ready')}",
+            f"- 报价年龄 / 财报期间年龄：{row.get('data_validation_quote_age_days')} 天 / {row.get('data_validation_financial_age_days')} 天",
+            f"- 核验发现：{row.get('data_validation_findings') or '无'}",
             f"- DCF 区间判断：{row.get('dcf_view') or '不可用'}；PE 区间判断：{row.get('pe_view') or '不可用'}",
             f"- 每股单位口径核验：{'已核验' if row.get('per_share_basis_verified') else '未核验'}；{row.get('per_share_basis_note') or ''}",
             f"- 置信度：{row.get('overall_confidence') or 'low'}",
@@ -199,11 +209,18 @@ def run(
     refresh: bool = False,
     allow_stale_cache: bool = False,
     max_cache_age_hours: float = 168.0,
+    max_quote_age_days: int = 7,
+    max_financial_age_days: int = 180,
 ) -> list[dict[str, Any]]:
     config = load_config(config_path)
     output_dir.mkdir(parents=True, exist_ok=True)
+    if isinstance(max_quote_age_days, bool) or not isinstance(max_quote_age_days, int) or max_quote_age_days < 0:
+        raise ValueError("max_quote_age_days must be a non-negative integer.")
+    if isinstance(max_financial_age_days, bool) or not isinstance(max_financial_age_days, int) or max_financial_age_days < 0:
+        raise ValueError("max_financial_age_days must be a non-negative integer.")
     rows: list[dict[str, Any]] = []
     raw_snapshots: dict[str, Any] = {}
+    validation_summaries: list[dict[str, Any]] = []
     for index, symbol in enumerate(symbols, start=1):
         print(f"=== {index}/{len(symbols)} Fetch data and value {symbol} ===", flush=True)
         try:
@@ -216,17 +233,58 @@ def run(
                 cache_dir=cache_dir,
             )
             raw_snapshots[symbol] = snapshot
-            row = value_ticker(symbol, snapshot, assumptions)
+            validation = validate_fundamentals_snapshot(
+                snapshot,
+                assumptions,
+                max_quote_age_days=max_quote_age_days,
+                max_financial_age_days=max_financial_age_days,
+                max_cache_age_hours=max_cache_age_hours,
+            )
+            validation_summaries.append(validation)
+            row = apply_validation_gates(value_ticker(symbol, snapshot, assumptions), validation)
             warnings = snapshot.get("fetch_warnings", [])
             if warnings:
                 row["provider_warnings"] = " | ".join(str(item) for item in warnings)
             rows.append(row)
         except Exception as exc:
-            rows.append(make_error_row(symbol, f"{type(exc).__name__}: {exc}"))
+            message = f"{type(exc).__name__}: {exc}"
+            rows.append(make_error_row(symbol, message))
+            validation_summaries.append({
+                "ticker": symbol,
+                "audit_date": datetime.now(timezone.utc).date().isoformat(),
+                "status": "BLOCKED",
+                "dcf_ready": False,
+                "pe_ready": False,
+                "quote_age_days": None,
+                "financial_age_days": None,
+                "findings_count": 1,
+                "blocker_count": 1,
+                "warning_count": 0,
+                "findings": [{"code": "SNAPSHOT_FETCH_OR_VALIDATION_FAILED", "severity": "BLOCKER", "message": message, "gates": "dcf,pe"}],
+            })
 
     generated_at = datetime.now(timezone.utc).isoformat()
     summary = pd.DataFrame(rows)
     summary.to_csv(output_dir / "valuation_summary.csv", index=False, float_format="%.8f")
+    quality_columns = [
+        "ticker", "data_validation_status", "data_validation_dcf_ready",
+        "data_validation_pe_ready", "data_validation_quote_age_days",
+        "data_validation_financial_age_days", "data_validation_findings",
+    ]
+    summary[[column for column in quality_columns if column in summary.columns]].to_csv(
+        output_dir / "valuation_data_quality.csv", index=False,
+    )
+    (output_dir / "valuation_validation_summary.json").write_text(
+        json.dumps({
+            "generated_at_utc": generated_at,
+            "max_quote_age_days": max_quote_age_days,
+            "max_financial_age_days": max_financial_age_days,
+            "max_cache_age_hours": max_cache_age_hours,
+            "tickers": validation_summaries,
+            "note": "Validation gates check dates, units, currencies and internal consistency; they do not independently verify vendor data against company filings.",
+        }, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
     (output_dir / "valuation_fundamentals.json").write_text(
         json.dumps(raw_snapshots, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
         encoding="utf-8",
@@ -250,6 +308,10 @@ def run(
         "refresh": refresh,
         "allow_stale_cache": allow_stale_cache,
         "max_cache_age_hours": max_cache_age_hours,
+        "validation_thresholds": {
+            "max_quote_age_days": max_quote_age_days,
+            "max_financial_age_days": max_financial_age_days,
+        },
         "successful_snapshots": len(raw_snapshots),
         "failed_snapshots": len(symbols) - len(raw_snapshots),
         "note": "Scenario valuation only; no trade execution or guaranteed price target.",
@@ -277,6 +339,8 @@ def main() -> None:
     parser.add_argument("--refresh", action="store_true", help="Force refresh Yahoo Finance snapshots.")
     parser.add_argument("--allow-stale-cache", action="store_true", help="Allow stale cached data only if refresh fails.")
     parser.add_argument("--max-cache-age-hours", type=float, default=168.0)
+    parser.add_argument("--max-quote-age-days", type=int, default=7)
+    parser.add_argument("--max-financial-age-days", type=int, default=180)
     args = parser.parse_args()
     if args.max_cache_age_hours <= 0:
         parser.error("--max-cache-age-hours must be positive.")
@@ -295,6 +359,8 @@ def main() -> None:
         refresh=args.refresh,
         allow_stale_cache=args.allow_stale_cache,
         max_cache_age_hours=args.max_cache_age_hours,
+        max_quote_age_days=args.max_quote_age_days,
+        max_financial_age_days=args.max_financial_age_days,
     )
 
 
