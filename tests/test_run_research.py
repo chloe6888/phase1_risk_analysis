@@ -114,9 +114,9 @@ def test_report_shows_imported_holdings_reconciliation_and_alerts() -> None:
     )
     assert "导入持仓与集中度检查" in report
     assert "持仓快照核对" in report
-    assert "verify shares" in report
+    assert "核对持股数量" in report
     assert "semiconductor_related" in report
-    assert "cash, bonds" in report
+    assert "现金、债券" in report
 
 
 def test_report_renders_memory_allocation_rule_and_balanced_share_targets() -> None:
