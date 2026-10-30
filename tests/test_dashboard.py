@@ -147,3 +147,74 @@ def test_memory_explanations_are_translated_to_chinese() -> None:
     assert "现金、债券、其他账户及融资负债" in app._memory_denominator_note(
         "Cash, bonds, other accounts and financing are not included."
     )
+
+
+def test_holdings_match_snapshot_requires_same_tickers_and_share_counts() -> None:
+    imported = pd.DataFrame({"ticker": ["MU", "GOOG"], "shares": [10, 2]})
+    analyzed = pd.DataFrame({"ticker": ["GOOG", "MU"], "shares": [2, 10]})
+    changed = pd.DataFrame({"ticker": ["GOOG", "MU"], "shares": [2, 9]})
+    missing = pd.DataFrame({"ticker": ["GOOG"], "shares": [2]})
+    assert app._holdings_match_snapshot(imported, analyzed)
+    assert not app._holdings_match_snapshot(imported, changed)
+    assert not app._holdings_match_snapshot(imported, missing)
+
+
+def test_build_decision_review_marks_holdings_and_watchlist_separately() -> None:
+    holdings = pd.DataFrame({
+        "ticker": ["MU"],
+        "shares": [10],
+        "average_cost": [100.0],
+        "snapshot_price": [120.0],
+        "market_value": [1200.0],
+        "weight_pct": [60.0],
+        "currency": ["USD"],
+    })
+    valuation = pd.DataFrame({
+        "ticker": ["MU", "GOOG"],
+        "company_name": ["Micron", "Alphabet"],
+        "currency": ["USD", "USD"],
+        "current_price": [125.0, 180.0],
+        "price_date": ["2026-10-29", "2026-10-29"],
+        "dcf_base": [140.0, 200.0],
+        "pe_base": [135.0, 195.0],
+        "dcf_buy_below": [105.0, 150.0],
+        "pe_buy_below": [101.0, 146.0],
+        "dcf_sell_review_above": [168.0, 240.0],
+        "pe_sell_review_above": [162.0, 234.0],
+        "dcf_view": ["between_thresholds", "between_thresholds"],
+        "pe_view": ["between_thresholds", "between_thresholds"],
+        "overall_confidence": ["low", "medium"],
+        "data_quality": ["complete_vendor_snapshot", "complete_vendor_snapshot"],
+        "limitations": ["周期股，需正常化现金流", ""],
+    })
+    result = app._build_decision_review(holdings, valuation)
+    assert result is not None
+    by_ticker = result.set_index("股票代码")
+    assert by_ticker.loc["MU", "持仓状态"] == "当前持仓"
+    assert by_ticker.loc["MU", "持股数量"] == 10
+    assert by_ticker.loc["GOOG", "持仓状态"] == "观察标的"
+    assert pd.isna(by_ticker.loc["GOOG", "持股数量"])
+
+
+def test_valuation_display_frame_translates_status_and_confidence() -> None:
+    frame = pd.DataFrame({
+        "ticker": ["MU"],
+        "dcf_view": ["below_buy_threshold"],
+        "pe_view": ["between_thresholds"],
+        "overall_confidence": ["low"],
+    })
+    shown = app._valuation_display_frame(frame)
+    assert shown is not None
+    assert shown.loc[0, "DCF 价格区间判断"] == "低于买入观察线"
+    assert shown.loc[0, "PE 价格区间判断"] == "处于两条观察线之间"
+    assert shown.loc[0, "估值可信度"] == "低"
+
+
+def test_risk_exposure_frame_sums_groups_to_one_hundred_percent() -> None:
+    positions = pd.DataFrame({
+        "risk_group": ["technology", "technology", "consumer"],
+        "market_value": [30.0, 20.0, 50.0],
+    })
+    result = app._risk_exposure_frame(positions, "risk_group", "风险主题")
+    assert round(float(result["持仓占比"].sum()), 8) == 100.0
+    assert result.iloc[0]["风险主题"] == "consumer"
