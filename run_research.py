@@ -192,7 +192,8 @@ def render_report(
         lines += [
             "", f"- Excess total return vs benchmark: {fmt_pct(backtest.get('excess_total_return'))}",
             f"- Annualized turnover estimate (drift-aware): {fmt_num(backtest.get('annualized_turnover'), 2)}",
-            f"- Actual rebalance count: {backtest.get('actual_rebalance_count', 'N/A')}", "",
+            f"- Actual rebalance count: {backtest.get('actual_rebalance_count', 'N/A')}",
+            f"- Terminal liquidation cost: {fmt_pct(backtest.get('terminal_liquidation_cost_return'))}", "",
         ]
         comparison = backtest.get("legacy_comparison", {})
         if comparison:
