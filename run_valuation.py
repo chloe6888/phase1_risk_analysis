@@ -175,7 +175,8 @@ def run(
     output_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, Any]] = []
     raw_snapshots: dict[str, Any] = {}
-    for symbol in symbols:
+    for index, symbol in enumerate(symbols, start=1):
+        print(f"=== {index}/{len(symbols)} Fetch data and value {symbol} ===", flush=True)
         try:
             assumptions = ticker_assumptions(config, symbol)
             snapshot = get_snapshot(
