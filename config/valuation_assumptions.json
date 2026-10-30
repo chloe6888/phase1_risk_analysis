@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "description": "Editable starter valuation assumptions. These are analyst-configured scenarios, not market consensus or company guidance. Review each ticker and update after each earnings release.",
+  "default_settings": {
+    "margin_of_safety": 0.25,
+    "overvaluation_premium": 0.2,
+    "forecast_years": 5
+  },
+  "tickers": {
+    "GOOG": {
+      "cyclical": false,
+      "assumption_source": "初始研究假设（人工设定，非市场一致预期）",
+      "notes": "关注搜索广告、Google Cloud、AI资本开支与自由现金流。DCF基于当前报告FCF，需检查AI投资对现金流的影响。",
+      "scenarios": {
+        "bear": {
+          "fcf_growth": 0.05,
+          "discount_rate": 0.1,
+          "terminal_growth": 0.02,
+          "fair_pe": 18
+        },
+        "base": {
+          "fcf_growth": 0.09,
+          "discount_rate": 0.09,
+          "terminal_growth": 0.025,
+          "fair_pe": 21
+        },
+        "bull": {
+          "fcf_growth": 0.13,
+          "discount_rate": 0.085,
+          "terminal_growth": 0.03,
+          "fair_pe": 24
+        }
+      }
+    },
+    "NVDA": {
+      "cyclical": false,
+      "assumption_source": "初始研究假设（人工设定，非市场一致预期）",
+      "notes": "关注数据中心增长、毛利率、客户资本开支、出口限制和产品迭代；高增长假设必须由订单、收入和利润率支持。",
+      "scenarios": {
+        "bear": {
+          "fcf_growth": 0.05,
+          "discount_rate": 0.105,
+          "terminal_growth": 0.02,
+          "fair_pe": 18
+        },
+        "base": {
+          "fcf_growth": 0.12,
+          "discount_rate": 0.1,
+          "terminal_growth": 0.025,
+          "fair_pe": 23
+        },
+        "bull": {
+          "fcf_growth": 0.2,
+          "discount_rate": 0.095,
+          "terminal_growth": 0.03,
+          "fair_pe": 28
+        }
+      }
+    },
+    "MU": {
+      "cyclical": true,
+      "assumption_source": "周期股初始研究假设（人工设定，非市场一致预期）",
+      "notes": "存储行业强周期；报告FCF可能处于周期高点/低点。建议用户补充跨周期正常化FCF后再把DCF用于买卖判断。",
+      "scenarios": {
+        "bear": {
+          "fcf_growth": -0.05,
+          "discount_rate": 0.12,
+          "terminal_growth": 0.015,
+          "fair_pe": 10
+        },
+        "base": {
+          "fcf_growth": 0.08,
+          "discount_rate": 0.11,
+          "terminal_growth": 0.02,
+          "fair_pe": 14
+        },
+        "bull": {
+          "fcf_growth": 0.18,
+          "discount_rate": 0.1,
+          "terminal_growth": 0.025,
+          "fair_pe": 18
+        }
+      }
+    },
+    "SKHY": {
+      "cyclical": true,
+      "assumption_source": "周期股初始研究假设（人工设定，非市场一致预期）",
+      "notes": "需先核验Yahoo Finance是否覆盖该交易代码及其证券类型；SK hynix为强周期存储公司，估值应采用跨周期正常化盈利/FCF。",
+      "scenarios": {
+        "bear": {
+          "fcf_growth": -0.05,
+          "discount_rate": 0.12,
+          "terminal_growth": 0.015,
+          "fair_pe": 10
+        },
+        "base": {
+          "fcf_growth": 0.08,
+          "discount_rate": 0.11,
+          "terminal_growth": 0.02,
+          "fair_pe": 14
+        },
+        "bull": {
+          "fcf_growth": 0.18,
+          "discount_rate": 0.1,
+          "terminal_growth": 0.025,
+          "fair_pe": 18
+        }
+      }
+    }
+  }
+}
