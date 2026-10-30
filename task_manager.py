@@ -117,11 +117,14 @@ def get_task_log(task_id: str, repository_root: Path = ROOT, max_chars: int = 12
         return "暂无运行日志。"
 
 
-def active_output_dir(repository_root: Path = ROOT) -> Path:
-    """Return the last fully successful run; fall back to legacy outputs."""
+def active_output_dir(repository_root: Path = ROOT, task_type: str = "research") -> Path:
+    """Return the last successful output directory for a task type."""
+    if task_type not in {"research", "valuation"}:
+        raise ValueError("task_type must be 'research' or 'valuation'.")
     root = Path(repository_root)
     outputs = root / "outputs"
-    pointer = read_json(outputs / "latest_success.json")
+    pointer_name = "latest_valuation_success.json" if task_type == "valuation" else "latest_success.json"
+    pointer = read_json(outputs / pointer_name)
     relative = pointer.get("artifacts_dir") if pointer else None
     if isinstance(relative, str) and relative:
         candidate = (root / relative).resolve()
@@ -157,8 +160,14 @@ def _acquire_launch_lock(output_root: Path) -> tuple[int, Path]:
         raise TaskAlreadyRunning("另一个任务正在提交，请稍后再试。") from exc
 
 
-def start_task(command: Sequence[str], repository_root: Path = ROOT) -> dict[str, object]:
-    """Launch a detached worker. Returns immediately after the worker is spawned."""
+def start_task(
+    command: Sequence[str],
+    repository_root: Path = ROOT,
+    task_type: str = "research",
+) -> dict[str, object]:
+    """Launch a detached worker for a supported task type."""
+    if task_type not in {"research", "valuation"}:
+        raise ValueError("task_type must be 'research' or 'valuation'.")
     import subprocess
     import sys
 
@@ -193,6 +202,7 @@ def start_task(command: Sequence[str], repository_root: Path = ROOT) -> dict[str
         log_path = task_dir / "worker.log"
         status: dict[str, object] = {
             "task_id": task_id,
+            "task_type": task_type,
             "state": "queued",
             "created_at": utc_now(),
             "started_at": None,
@@ -242,8 +252,14 @@ def start_task(command: Sequence[str], repository_root: Path = ROOT) -> dict[str
 def publish_success(task_id: str, task_dir: Path, repository_root: Path = ROOT) -> None:
     root = Path(repository_root)
     artifacts = task_dir / "artifacts"
-    atomic_write_json(root / "outputs" / "latest_success.json", {
+    status = read_json(task_dir / "status.json") or {}
+    task_type = str(status.get("task_type", "research"))
+    if task_type not in {"research", "valuation"}:
+        raise ValueError(f"Unsupported task type in status: {task_type}")
+    pointer_name = "latest_valuation_success.json" if task_type == "valuation" else "latest_success.json"
+    atomic_write_json(root / "outputs" / pointer_name, {
         "task_id": task_id,
+        "task_type": task_type,
         "completed_at": utc_now(),
         "artifacts_dir": str(artifacts.relative_to(root)),
     })
