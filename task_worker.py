@@ -60,12 +60,20 @@ def main() -> int:
     env = os.environ.copy()
     env["PHASE1_OUTPUT_DIR"] = str(artifacts_dir)
     env["PYTHONUNBUFFERED"] = "1"
+    task_type = str(status.get("task_type", "research"))
+    is_valuation = task_type == "valuation"
+    initial_step = "1/1 准备估值研究" if is_valuation else "1/5 初始化研究流程"
+    initial_message = (
+        "个股估值任务正在执行；上一次成功估值结果会保留。"
+        if is_valuation else
+        "组合研究流程正在执行；上一次成功研究报告会保留。"
+    )
     update_status(
         status_path, status,
         state="running",
         started_at=utc_now(),
-        current_step="1/5 初始化研究流程",
-        message="后台研究流程正在执行；页面可以继续浏览上一次成功结果。",
+        current_step=initial_step,
+        message=initial_message,
     )
 
     try:
