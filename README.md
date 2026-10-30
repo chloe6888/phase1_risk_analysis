@@ -203,6 +203,37 @@ python backtest_engine.py \
 
 **重要假设：** 信号在收盘后形成，并在该收盘执行后应用到下一条收益区间，避免使用同日未来收益。日/周/月频率分别在每个交易日、每个自然周最后一个可用交易日、每个自然月最后一个可用交易日调仓。换手定义为漂移后的风险资产权重与目标风险资产权重之间绝对差额之和；买卖两侧均计入成交额。成本与滑点按该实际成交额计算，回测结束时还会按最后一期的实际风险资产权重计入期末清仓成本。旧的“目标权重乘每日收益”算法也会输出，供新旧口径审计，但该旧口径仍保留其未计漂移交易和期末清仓的历史算法局限。当前仍未模拟真实订单股数、成交价冲击、税费和停牌/涨跌停约束，因此这是更接近真实持仓的研究近似，而不是订单级回测。
 
+## 调仓频率与参数稳定性专项评估
+
+完成一次常规研究流程、更新好调整收盘价面板后，可以运行专项脚本，使用同一份本地行情比较日度、周度和月度调仓，并检查参数选择是否稳定：
+
+```bash
+python strategy_stability_report.py \
+  --prices data/raw/adjusted_close_panel.csv \
+  --benchmark SPY \
+  --test-start 2023-01-01 \
+  --baseline-lookback 126 \
+  --baseline-skip-recent 21 \
+  --baseline-top-n 2 \
+  --lookbacks 63,126,252 \
+  --skip-recents 5,21 \
+  --top-ns 1,2,3 \
+  --rebalance-freqs daily,weekly,monthly \
+  --train-window 252 \
+  --test-window 63 \
+  --transaction-cost-bps 5 \
+  --slippage-bps 5 \
+  --output-dir outputs/stability_review
+```
+
+三种频率的基准比较共享相同的信号参数、行情区间和初始资金起点。动量信号首次可用后，较低频率策略在等到下一次计划调仓之前按现金持有，不会因为首次持仓日期较晚而悄悄缩短评估区间。旧的目标权重算法会与新漂移模型并列输出。
+
+专项报告还会运行参数×频率网格和 walk-forward：网格汇总测试期超额收益、Sharpe 中位数及有效组合数；walk-forward 汇总每一折选中的 lookback、skip-recent、top-N 和调仓频率，统计各参数入选比例。它不会根据全区间收益自动挑选“赢家”。
+
+结果写入 outputs/stability_review，包括 cadence_comparison.csv、strategy_parameter_sweep.csv、walk_forward_folds.csv、walk_forward_parameter_stability.csv、净值/收益序列、运行参数与行情文件 SHA-256，以及 stability_report.md。可以另加 `--risk-free-yield-csv data/private/treasury_yield.csv`，文件必须包含 Date 和 annual_yield 两列，年化收益率用小数表示。
+
+test-start 应根据实际行情起止日期设定，并留出足够的训练期和测试期；若历史不足，可明确添加 `--skip-walk-forward`，但不能把单次参数网格当作滚动样本外验证。不要用测试期结果反复调参。
+
 ## 参数网格与样本外验证
 
 回测指标不能只看全区间结果。使用 `strategy_validation.py` 可以预先指定样本外区间，逐一比较不同参数，并输出训练期、测试期和逐年表现。示例：
