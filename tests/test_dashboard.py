@@ -220,3 +220,27 @@ def test_risk_exposure_frame_sums_groups_to_one_hundred_percent() -> None:
     result = app._risk_exposure_frame(positions, "risk_group", "风险主题")
     assert round(float(result["持仓占比"].sum()), 8) == 100.0
     assert result.iloc[0]["风险主题"] == "consumer"
+
+
+def test_make_pipeline_command_passes_full_net_portfolio_equity() -> None:
+    command = app.make_pipeline_command(
+        weights=None,
+        holdings_csv="data/private/holdings_snapshot.csv",
+        test_start="2023-01-01",
+        portfolio_value=250000.0,
+    )
+    assert "--portfolio-value" in command
+    assert float(command[command.index("--portfolio-value") + 1]) == 250000.0
+
+
+def test_make_pipeline_command_rejects_nonpositive_or_nonfinite_portfolio_equity() -> None:
+    import pytest
+
+    for invalid in (0.0, -100.0, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="finite and positive"):
+            app.make_pipeline_command(
+                weights=None,
+                holdings_csv="data/private/holdings_snapshot.csv",
+                test_start="2023-01-01",
+                portfolio_value=invalid,
+            )
