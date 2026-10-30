@@ -295,7 +295,7 @@ def test_currency_mismatch_blocks_dcf_and_pe_values() -> None:
     assert result["dcf_base"] is None
     assert result["pe_base"] is None
     assert result["overall_confidence"] == "low"
-    assert "未进行货币换算" in result["limitations"]
+    assert "未进行汇率换算" in result["limitations"]
 
 
 def test_reported_currency_mismatch_blocks_dcf_but_keeps_quote_currency_pe() -> None:
