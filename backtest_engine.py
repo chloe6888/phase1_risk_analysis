@@ -310,6 +310,9 @@ def run_backtest(
             "strategy_return": net,
             "benchmark_return": period_returns[benchmark],
             "turnover": traded_notional,
+            "rebalance_turnover": traded_notional,
+            "liquidation_turnover": 0.0,
+            "terminal_liquidation_cost_return": 0.0,
             "rebalance_executed": do_rebalance,
             "risk_free_return": float(risk_free_daily.iloc[position]),
         })
@@ -318,6 +321,25 @@ def run_backtest(
         raise ValueError("At least two price observations are required for a backtest.")
     daily = pd.DataFrame(daily_rows, index=pd.DatetimeIndex(applied_dates))
     applied_weights = pd.DataFrame(applied_rows, index=pd.DatetimeIndex(applied_dates)).reindex(columns=prices.columns)
+
+    # Liquidate the remaining actual holdings at the final close. This terminal
+    # sell notional is charged in the final return interval and included in
+    # turnover/cost totals instead of being silently omitted.
+    terminal_liquidation_turnover = float(end_weights.abs().sum())
+    terminal_liquidation_cost_fraction = terminal_liquidation_turnover * cost_rate
+    if terminal_liquidation_cost_fraction >= 1.0:
+        raise ValueError("Estimated terminal liquidation cost reaches 100% of portfolio value; check cost assumptions.")
+    if not daily.empty and terminal_liquidation_turnover > 0:
+        pre_liquidation_return = float(daily.iloc[-1]["strategy_return"])
+        terminal_liquidation_cost = (1.0 + pre_liquidation_return) * terminal_liquidation_cost_fraction
+        post_liquidation_return = (1.0 + pre_liquidation_return) * (1.0 - terminal_liquidation_cost_fraction) - 1.0
+        daily.iloc[-1, daily.columns.get_loc("terminal_liquidation_cost_return")] = terminal_liquidation_cost
+        daily.iloc[-1, daily.columns.get_loc("liquidation_turnover")] = terminal_liquidation_turnover
+        daily.iloc[-1, daily.columns.get_loc("turnover")] += terminal_liquidation_turnover
+        daily.iloc[-1, daily.columns.get_loc("strategy_return")] = post_liquidation_return
+        daily.iloc[-1, daily.columns.get_loc("transaction_cost_return")] = (
+            float(daily.iloc[-1]["strategy_gross_return"]) - post_liquidation_return
+        )
 
     # Former vectorized method, run on identical signal/rebalance dates.
     legacy_applied = scheduled_targets.shift(1).fillna(0.0)
@@ -382,6 +404,8 @@ def run_backtest(
         "average_daily_turnover": float(daily["turnover"].mean()),
         "annualized_turnover": float(daily["turnover"].mean() * periods_per_year),
         "cumulative_transaction_cost_return": float(daily["transaction_cost_return"].sum()),
+        "terminal_liquidation_turnover": terminal_liquidation_turnover,
+        "terminal_liquidation_cost_return": float(daily["terminal_liquidation_cost_return"].sum()),
         "strategy": strategy_metrics,
         "benchmark": benchmark_metrics,
         "legacy_strategy": legacy_metrics,
@@ -395,7 +419,7 @@ def run_backtest(
             "new_total_return": float(strategy_metrics["total_return"]),
             "legacy_max_drawdown": float(legacy_metrics["max_drawdown"]),
             "new_max_drawdown": float(strategy_metrics["max_drawdown"]),
-            "comparison_scope": "Same signals and rebalance dates; legacy assumes target weights for every interval and misses drift-driven trading costs.",
+            "comparison_scope": "Same signals and rebalance dates; legacy assumes target weights for every interval and omits drift-driven trading and terminal liquidation costs.",
         },
         "excess_total_return": float(strategy_metrics["total_return"] - benchmark_metrics["total_return"]),
         "tracking_error_annualized": tracking_annual,
@@ -404,7 +428,7 @@ def run_backtest(
         "risk_free_rate_source": "dated annualized yield series" if risk_free_yield is not None else "constant annual rate",
         "methodology_note": (
             "Close-time signals are executed for the next return interval. Holdings drift between scheduled rebalances. "
-            "Turnover is actual absolute risky-position traded notional; costs are charged on that notional. "
+            "Turnover is actual absolute risky-position traded notional; costs include scheduled trades and final liquidation. "
             "Weekly/monthly rebalances occur on the last available trading close of each period. "
             "The previous target-weight-rebalanced calculation is retained for comparison."
         ),
