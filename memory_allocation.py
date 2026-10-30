@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 from holdings_manager import load_holdings, weights_from_price_panel
+from etf_lookthrough import load_issuer_snapshot
 from portfolio_risk import DEFAULT_OUTPUT_DIR, load_price_panel
 
 ROOT = Path(__file__).resolve().parent
@@ -129,6 +130,8 @@ def analyze_memory_positions(
     target_scenarios: Mapping[str, Mapping[str, float]] | None = None,
     dram_lookthrough: Mapping[str, float] | None = None,
     lookthrough_asof: str = DEFAULT_LOOKTHROUGH_ASOF,
+    lookthrough_source: str = "manually configured default",
+    lookthrough_source_sha256: str | None = None,
     fractional_shares: bool = False,
     max_staleness_calendar_days: int = 7,
 ) -> tuple[dict[str, object], pd.DataFrame, pd.DataFrame]:
@@ -399,6 +402,8 @@ def analyze_memory_positions(
         "overall_reason": overall_reason,
         "max_issuer_exposure_pct": max_issuer_exposure_pct,
         "lookthrough_asof": lookthrough_asof,
+        "lookthrough_source": str(lookthrough_source),
+        "lookthrough_source_sha256": lookthrough_source_sha256,
         "dram_lookthrough_weights": {key: float(value) for key, value in lookthrough.items()},
         "lookthrough_exposure_values": lookthrough_values,
         "lookthrough_issuer_weights_pct": issuer_weights,
@@ -434,11 +439,29 @@ def main() -> None:
                         help="Assumed SKHY look-through share of DRAM ETF, decimal from 0 to 1")
     parser.add_argument("--lookthrough-asof", default=DEFAULT_LOOKTHROUGH_ASOF,
                         help="Date of the manually verified DRAM holdings assumption")
+    parser.add_argument("--dram-lookthrough-json", type=Path,
+                        help="Dated JSON snapshot produced by etf_lookthrough.py; overrides manual DRAM issuer assumptions.")
     parser.add_argument("--fractional-shares", action="store_true",
                         help="Allow 4-decimal target quantities; default rounds to whole shares")
     args = parser.parse_args()
     if args.dram_mu_exposure < 0 or args.dram_mu_exposure > 1 or args.dram_skhy_exposure < 0 or args.dram_skhy_exposure > 1:
         parser.error("DRAM look-through fractions must be between zero and one.")
+    dram_lookthrough = {"MU": args.dram_mu_exposure, "SKHY": args.dram_skhy_exposure}
+    lookthrough_asof = args.lookthrough_asof
+    lookthrough_source = "manual CLI assumptions"
+    lookthrough_source_sha256 = None
+    if args.dram_lookthrough_json is not None:
+        try:
+            snapshot_weights, snapshot_asof, snapshot = load_issuer_snapshot(args.dram_lookthrough_json)
+        except ValueError as exc:
+            parser.error(str(exc))
+        missing_issuers = sorted({"MU", "SKHY"} - set(snapshot_weights))
+        if missing_issuers:
+            parser.error(f"DRAM issuer snapshot is missing required issuers: {missing_issuers}")
+        dram_lookthrough = {"MU": snapshot_weights["MU"], "SKHY": snapshot_weights["SKHY"]}
+        lookthrough_asof = snapshot_asof
+        lookthrough_source = str(snapshot.get("source_name") or args.dram_lookthrough_json.name)
+        lookthrough_source_sha256 = str(snapshot.get("source_sha256") or "") or None
     holdings = load_holdings(args.holdings_csv)
     close_prices = load_price_panel(args.prices)
     adjusted = load_price_panel(args.adjusted_prices) if args.adjusted_prices.exists() else None
@@ -453,8 +476,10 @@ def main() -> None:
         max_memory_weight_pct=args.max_memory_weight_pct,
         max_issuer_exposure_pct=args.max_issuer_exposure_pct,
         target_scenarios=scenarios,
-        dram_lookthrough={"MU": args.dram_mu_exposure, "SKHY": args.dram_skhy_exposure},
-        lookthrough_asof=args.lookthrough_asof,
+        dram_lookthrough=dram_lookthrough,
+        lookthrough_asof=lookthrough_asof,
+        lookthrough_source=lookthrough_source,
+        lookthrough_source_sha256=lookthrough_source_sha256,
         fractional_shares=args.fractional_shares,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)

@@ -48,6 +48,7 @@
     ├── run_research.py
     ├── dashboard.py
     ├── holdings_manager.py
+    ├── etf_lookthrough.py
     ├── memory_allocation.py
     ├── requirements-dashboard.txt
     ├── start_dashboard.sh
@@ -393,6 +394,31 @@ python run_research.py \
 通过一键入口导入后，程序会根据持仓代码下载并检查历史行情，用最近有效的未调整收盘价估算市值与组合权重，生成成本/盈亏表和单一仓位集中度提醒。如果同目录存在 `holdings_snapshot.csv.meta.json`，程序还会把行项目合计与券商截图总额对账，明确显示差异，而不是静默消除。
 
 **重要：** 股数必须与券商端核实。截图没有直接显示持股数量时，不应仅凭反推数字执行交易。最近历史收盘价不是实时可成交报价；现金、债券、其他账户、汇率及融资负债未导入时，权重只代表导入的股票/ETF 仓位。
+
+## DRAM ETF 穿透持仓导入与来源审计
+
+新增 `etf_lookthrough.py`，用于导入基金管理人下载的 DRAM 日度持仓 CSV，按发行人聚合直接股票、总收益互换和 ADR 等持仓行，并保存日期、来源名称、原始文件 SHA-256、权重合计及未映射行告警。默认识别 Micron（MU）和 SK hynix（SKHY）；其他名称可以通过 JSON issuer map 扩展。
+
+Roundhill 官方 DRAM 页面提供 `Download CSV` 持仓入口；官方说明其 Top Holdings 权重会合并股票与总收益互换敞口，且 Top Holdings 一般不包含现金管理类持仓。建议下载完整持仓 CSV，不要只抄 Top Holdings。导入时必须明确填写文件对应的持仓日期。
+
+```bash
+python etf_lookthrough.py \
+  --holdings-csv data/private/DRAM_daily_holdings.csv \
+  --as-of 2026-10-29 \
+  --source-name "Roundhill issuer holdings CSV"
+```
+
+模块会生成带日期的原始标准化持仓、发行人分项敞口 CSV 和 JSON 快照。随后可以将 JSON 快照传入存储持仓决策模块：
+
+```bash
+python memory_allocation.py \
+  --holdings-csv data/private/holdings_snapshot.csv \
+  --dram-lookthrough-json outputs/etf_holdings/DRAM_lookthrough_2026-10-29.json
+```
+
+该快照会覆盖手工默认比例，并把来源日期、来源名称和原始 CSV SHA-256 写入 `memory_allocation_summary.json`。若完整持仓总权重不在 95%–105% 范围内，或存在未映射的非现金持仓，程序会明确告警；不会把未识别项目静默计入 MU/SKHY。现金和现金等价物会单独统计。
+
+**使用边界：** 导入是基于用户从官方页面下载的文件，不依赖未公开或未经确认的固定 API 地址，也不在后台自动抓取。CSV 文件日期必须与真实持仓日期一致；完成导入后仍应检查未映射行、总权重和证券类型。发行人合计将直接股票、掉期和 ADR 归入同一经济发行人风险敞口，但这些工具的法律和交易属性并不相同。
 
 ## MU / SKHY / DRAM 存储持仓决策模块
 
