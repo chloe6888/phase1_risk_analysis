@@ -369,3 +369,29 @@ def test_quote_currency_normalized_fcf_can_enable_adr_dcf() -> None:
     assert result["valuation_fcf"] == 250.0
     assert result["valuation_fcf_currency"] == "USD"
     assert result["fcf_basis"] == "user_normalized_fcf"
+
+
+def test_skhY_starter_config_blocks_per_share_valuation_until_verified() -> None:
+    from pathlib import Path
+
+    from run_valuation import load_config, ticker_assumptions
+
+    config = load_config(Path(__file__).resolve().parents[1] / "config" / "valuation_assumptions.json")
+    assumptions = ticker_assumptions(config, "SKHY")
+    assert assumptions["adr_underlying_shares_per_ads"] == 10
+    assert assumptions["per_share_basis_verified"] is False
+    fundamentals = {
+        "current_price": 160,
+        "currency": "USD",
+        "financial_currency": "KRW",
+        "dcf_currency_mismatch": True,
+        "pe_currency_mismatch": False,
+        "forward_eps": 15.0,
+        "free_cash_flow": 100,
+        "diluted_shares": 10,
+    }
+    result = value_ticker("SKHY", fundamentals, assumptions)
+    assert result["dcf_base"] is None
+    assert result["pe_base"] is None
+    assert result["overall_confidence"] == "low"
+    assert "每股估值口径尚未核验" in result["limitations"]
