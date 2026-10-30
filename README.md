@@ -40,6 +40,7 @@
     ├── portfolio_risk.py
     ├── backtest_engine.py
     ├── strategy_validation.py
+    ├── strategy_research.py
     ├── walk_forward_validation.py
     ├── run_research.py
     ├── dashboard.py
@@ -54,6 +55,7 @@
     │   ├── test_portfolio_risk.py
     │   ├── test_backtest_engine.py
     │   ├── test_strategy_validation.py
+    │   ├── test_strategy_research.py
     │   ├── test_walk_forward_validation.py
     │   ├── test_run_research.py
     │   ├── test_dashboard.py
@@ -250,6 +252,42 @@ python strategy_validation.py \
 默认同时测试日、周、月三种调仓频率；可通过 `--rebalance-freqs daily,weekly,monthly` 显式配置。程序会报告所有参数×调仓频率组合，不会自动选出“最优参数”。建议先依据训练期设定参数，再把测试期作为未参与挑选的评估区间；测试期结果一旦被反复用于选参数，就不再是真正独立的样本外证据。
 
 **无风险利率序列（可选）：** 可使用 `--risk-free-yield-csv path/to/treasury_yield.csv` 提供 `Date,annual_yield` 两列。日期应覆盖回测区间，`annual_yield` 使用小数年化收益率（例如 0.045 代表 4.5%，不能填 4.5）。没有新观测的日期沿用最近一次收益率，并按 `(1 + annual_yield)^(1/252) - 1` 换算为日收益率。未提供文件时，仍使用 `--risk-free-rate` 的固定年化值（默认 0）。这是一种现金收益率近似，不等于投资者可实现的实际每日收益。
+
+## 多策略比较与过拟合审计
+
+新增 `strategy_research.py`，用于在相同价格面板、基准、训练/测试区间、调仓频率、无风险收益和交易成本假设下比较多种简单策略基线：
+
+- `equal_weight`：非基准资产等权配置；
+- `cross_sectional_momentum`：横截面动量；
+- `time_series_momentum`：时间序列动量；
+- `trend_following`：均线趋势过滤；
+- `mean_reversion`：低于滚动均线的均值回归基线；
+- `low_volatility`：历史实现波动率较低的资产。
+
+示例：
+
+```bash
+python strategy_research.py \
+  --test-start 2023-01-01 \
+  --strategies equal_weight,cross_sectional_momentum,time_series_momentum,trend_following,mean_reversion,low_volatility \
+  --lookback 126 \
+  --skip-recent 21 \
+  --top-n 2 \
+  --rebalance-freq monthly \
+  --transaction-cost-bps 5 \
+  --slippage-bps 5
+```
+
+输出文件：
+
+| 文件 | 内容 |
+|---|---|
+| `outputs/strategy_comparison.csv` | 每种候选策略的训练期、测试期和基准比较指标 |
+| `outputs/strategy_selected_oos_returns.csv` | 仅按训练期 Sharpe 选出的策略在测试期的逐日收益 |
+| `outputs/strategy_research_summary.json` | 区间、候选策略、选优结果、DSR 和限制说明 |
+| `outputs/strategy_research_report.md` | 人类可读的多策略研究报告 |
+
+**审计边界：** 候选胜出者只按训练期 Sharpe 选择，测试期数据不参与选优。DSR 是近似统计诊断，使用候选数量近似试验次数并假设试验独立；策略之间高度相关时，修正结果并非严格显著性保证。单次留出测试也无法消除反复查看测试结果造成的窥探偏差，仍应保留从未参与调参的最终区间，并结合滚动 Walk-forward 结果。以上策略均为价格数据基线，不包含基本面、行业因子和真实订单执行。
 
 ## 一键运行完整研究流程
 
