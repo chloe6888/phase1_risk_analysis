@@ -163,3 +163,31 @@ def test_latest_dram_lookthrough_defaults_are_dated() -> None:
     assert app.DEFAULT_LOOKTHROUGH_ASOF == "2026-10-29"
     assert app.DEFAULT_DRAM_LOOKTHROUGH["MU"] == pytest.approx(0.2787)
     assert app.DEFAULT_DRAM_LOOKTHROUGH["SKHY"] == pytest.approx(0.2182)
+
+def test_scenario_summary_reports_post_adjustment_issuer_lookthrough() -> None:
+    summary, _, _ = app.analyze_memory_positions(
+        sample_holdings(), sample_prices(), max_memory_weight_pct=25, max_issuer_exposure_pct=12
+    )
+    balanced = summary['scenario_lookthrough_exposures_pct']['balanced']
+    assert balanced['MU'] == pytest.approx(8.0 + 5.0 * 0.2787)
+    assert balanced['SKHY'] == pytest.approx(6.0 + 5.0 * 0.2182)
+    assert summary['scenario_issuer_limit_status']['balanced'] == {'MU': False, 'SKHY': False}
+    assert summary['scenario_memory_weights_pct']['balanced'] == pytest.approx(19.0)
+
+def test_preserving_etf_scenario_flags_issuer_exposure_from_etf_alone() -> None:
+    holdings = sample_holdings().copy()
+    holdings.loc[holdings['ticker'] == 'DRAM', 'shares'] = 400
+    summary, _, decisions = app.analyze_memory_positions(
+        holdings, sample_prices(), portfolio_value=14500,
+        max_memory_weight_pct=25, max_issuer_exposure_pct=12,
+    )
+    cap = summary['scenario_lookthrough_exposures_pct']['cap_only_preserve_etf']
+    flags = summary['scenario_issuer_limit_status']['cap_only_preserve_etf']
+    dram_weight = 10000 / 14500 * 100
+    assert cap['MU'] == pytest.approx(dram_weight * 0.2787)
+    assert cap['SKHY'] == pytest.approx(dram_weight * 0.2182)
+    assert flags == {'MU': True, 'SKHY': True}
+    assert summary['scenario_memory_weights_pct']['cap_only_preserve_etf'] > 25
+    cap_rows = decisions[decisions['scenario'] == 'cap_only_preserve_etf'].set_index('ticker')
+    assert cap_rows.loc['MU', 'target_shares'] == 0
+    assert cap_rows.loc['SKHY', 'target_shares'] == 0

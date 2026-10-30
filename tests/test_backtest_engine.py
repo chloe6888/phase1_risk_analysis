@@ -95,10 +95,87 @@ def test_cli_writes_backtest_outputs(tmp_path) -> None:
         check=True, capture_output=True, text=True,
     )
     summary = json.loads((output_dir / "backtest_summary.json").read_text())
-    assert summary["strategy_name"] == "cross_sectional_momentum_v1"
+    assert summary["strategy_name"] == "cross_sectional_momentum_v2_drift_aware"
     assert summary["benchmark_ticker"] == "SPY"
     assert summary["observations"] > 0
     for filename in ("backtest_summary.json", "backtest_daily_returns.csv", "backtest_applied_weights.csv", "backtest_equity_curve.csv"):
         assert (output_dir / filename).exists()
         assert (output_dir / filename).stat().st_size > 0
     assert '"strategy"' in result.stdout
+
+
+def test_drifted_weights_create_real_turnover_and_cost_when_targets_do_not_change() -> None:
+    index = pd.bdate_range("2024-01-01", periods=5)
+    prices = pd.DataFrame({
+        "AAA": [100.0, 200.0, 200.0, 200.0, 200.0],
+        "BBB": [100.0, 100.0, 100.0, 100.0, 100.0],
+        "SPY": [100.0, 101.0, 102.0, 103.0, 104.0],
+    }, index=index)
+    targets = pd.DataFrame({"AAA": 0.5, "BBB": 0.5}, index=index)
+    _, daily, applied, equity = app.run_backtest(
+        prices, targets, benchmark="SPY", transaction_cost_bps=10, slippage_bps=0,
+    )
+    assert daily.loc[index[2], "turnover"] == pytest.approx(1.0 / 3.0)
+    assert daily.loc[index[2], "transaction_cost_return"] > 0
+    assert daily.loc[index[2], "legacy_turnover"] == pytest.approx(0.0)
+    assert daily.loc[index[2], "legacy_transaction_cost_return"] == pytest.approx(0.0)
+    assert applied.loc[index[2], "AAA"] == pytest.approx(0.5)
+    assert equity["legacy_strategy_equity"].iloc[-1] != pytest.approx(equity["strategy_equity"].iloc[-1])
+
+
+def test_weekly_and_monthly_rebalances_use_last_available_trading_close() -> None:
+    index = pd.bdate_range("2024-01-01", periods=45)
+    prices = pd.DataFrame({
+        "AAA": 100.0 + np.arange(len(index)),
+        "BBB": 120.0 - 0.2 * np.arange(len(index)),
+        "SPY": 100.0 + 0.1 * np.arange(len(index)),
+    }, index=index)
+    targets = pd.DataFrame({"AAA": np.linspace(0.2, 0.8, len(index)), "BBB": 0.0}, index=index)
+    _, weekly, _, _ = app.run_backtest(prices, targets, benchmark="SPY", rebalance_freq="weekly")
+    _, monthly, _, _ = app.run_backtest(prices, targets, benchmark="SPY", rebalance_freq="monthly")
+    n_weekly = int((~pd.Series(index.to_period("W-FRI")).duplicated(keep="last")).sum())
+    n_monthly = int((~pd.Series(index.to_period("M")).duplicated(keep="last")).sum())
+    assert int(weekly["rebalance_executed"].sum()) == n_weekly - 1
+    assert int(monthly["rebalance_executed"].sum()) == n_monthly - 1
+
+
+def test_backtest_accepts_dated_annualized_risk_free_yield_series() -> None:
+    index = pd.bdate_range("2024-01-01", periods=6)
+    prices = pd.DataFrame({
+        "AAA": [100, 101, 102, 103, 104, 105],
+        "SPY": [100, 100.5, 101, 101.5, 102, 102.5],
+    }, index=index)
+    targets = pd.DataFrame({"AAA": 1.0}, index=index)
+    yields = pd.Series(0.05, index=index, name="annual_yield")
+    summary, daily, _, _ = app.run_backtest(prices, targets, benchmark="SPY", risk_free_yield=yields)
+    expected = (1.05 ** (1 / app.TRADING_DAYS_PER_YEAR)) - 1
+    assert daily["risk_free_return"].iloc[0] == pytest.approx(expected)
+    assert summary["risk_free_rate_source"] == "dated annualized yield series"
+
+
+def test_load_risk_free_yield_requires_explicit_decimal_column(tmp_path) -> None:
+    path = tmp_path / "rf.csv"
+    pd.DataFrame({"Date": ["2024-01-01", "2024-01-02"], "annual_yield": [0.04, 0.041]}).to_csv(path, index=False)
+    loaded = app.load_risk_free_yield(path)
+    assert loaded.loc[pd.Timestamp("2024-01-02")] == pytest.approx(0.041)
+    pd.DataFrame({"Date": ["2024-01-01"], "yield_pct": [4.0]}).to_csv(path, index=False)
+    with pytest.raises(ValueError, match="annual_yield"):
+        app.load_risk_free_yield(path)
+
+
+def test_backtest_charges_terminal_liquidation_cost_and_turnover() -> None:
+    index = pd.bdate_range("2024-01-01", periods=4)
+    prices = pd.DataFrame({
+        "AAA": [100.0, 100.0, 100.0, 100.0],
+        "SPY": [100.0, 101.0, 102.0, 103.0],
+    }, index=index)
+    targets = pd.DataFrame({"AAA": 0.5}, index=index)
+    summary, daily, _, _ = app.run_backtest(
+        prices, targets, benchmark="SPY", transaction_cost_bps=10, slippage_bps=0,
+    )
+    expected_cost = 0.5 * 10 / 10_000
+    assert daily.loc[index[-1], "liquidation_turnover"] == pytest.approx(0.5)
+    assert daily.loc[index[-1], "terminal_liquidation_cost_return"] == pytest.approx(expected_cost)
+    assert summary["terminal_liquidation_turnover"] == pytest.approx(0.5)
+    assert summary["terminal_liquidation_cost_return"] == pytest.approx(expected_cost)
+    assert daily.loc[index[-1], "turnover"] >= daily.loc[index[-1], "rebalance_turnover"]

@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "description": "Editable starter valuation assumptions. These are analyst-configured scenarios, not market consensus or company guidance. Review each ticker and update after each earnings release.",
+  "default_settings": {
+    "margin_of_safety": 0.25,
+    "overvaluation_premium": 0.2,
+    "forecast_years": 5
+  },
+  "tickers": {
+    "GOOG": {
+      "cyclical": false,
+      "assumption_source": "初始研究假设（人工设定，非市场一致预期）",
+      "notes": "关注搜索广告、Google Cloud、AI资本开支与自由现金流。DCF基于当前报告FCF，需检查AI投资对现金流的影响。",
+      "scenarios": {
+        "bear": {
+          "fcf_growth": 0.05,
+          "terminal_growth": 0.02,
+          "fair_pe": 18,
+          "cost_of_equity": 0.1
+        },
+        "base": {
+          "fcf_growth": 0.09,
+          "terminal_growth": 0.025,
+          "fair_pe": 21,
+          "cost_of_equity": 0.09
+        },
+        "bull": {
+          "fcf_growth": 0.13,
+          "terminal_growth": 0.03,
+          "fair_pe": 24,
+          "cost_of_equity": 0.085
+        }
+      },
+      "per_share_basis_verified": true,
+      "per_share_basis_note": "美国市场普通股上市证券；EPS 与股数按该上市证券单位使用，仍需与公司/供应商披露交叉核验。"
+    },
+    "NVDA": {
+      "cyclical": false,
+      "assumption_source": "初始研究假设（人工设定，非市场一致预期）",
+      "notes": "关注数据中心增长、毛利率、客户资本开支、出口限制和产品迭代；高增长假设必须由订单、收入和利润率支持。",
+      "scenarios": {
+        "bear": {
+          "fcf_growth": 0.05,
+          "terminal_growth": 0.02,
+          "fair_pe": 18,
+          "cost_of_equity": 0.105
+        },
+        "base": {
+          "fcf_growth": 0.12,
+          "terminal_growth": 0.025,
+          "fair_pe": 23,
+          "cost_of_equity": 0.1
+        },
+        "bull": {
+          "fcf_growth": 0.2,
+          "terminal_growth": 0.03,
+          "fair_pe": 28,
+          "cost_of_equity": 0.095
+        }
+      },
+      "per_share_basis_verified": true,
+      "per_share_basis_note": "美国市场普通股上市证券；EPS 与股数按该上市证券单位使用，仍需与公司/供应商披露交叉核验。"
+    },
+    "MU": {
+      "cyclical": true,
+      "assumption_source": "周期股初始研究假设（人工设定，非市场一致预期）",
+      "notes": "存储行业强周期；报告FCF可能处于周期高点/低点。建议用户补充跨周期正常化FCF后再把DCF用于买卖判断。",
+      "scenarios": {
+        "bear": {
+          "fcf_growth": -0.05,
+          "terminal_growth": 0.015,
+          "fair_pe": 10,
+          "cost_of_equity": 0.12
+        },
+        "base": {
+          "fcf_growth": 0.08,
+          "terminal_growth": 0.02,
+          "fair_pe": 14,
+          "cost_of_equity": 0.11
+        },
+        "bull": {
+          "fcf_growth": 0.18,
+          "terminal_growth": 0.025,
+          "fair_pe": 18,
+          "cost_of_equity": 0.1
+        }
+      },
+      "per_share_basis_verified": true,
+      "per_share_basis_note": "美国市场普通股上市证券；EPS 与股数按该上市证券单位使用，仍需与公司/供应商披露交叉核验。"
+    },
+    "SKHY": {
+      "cyclical": true,
+      "assumption_source": "周期股初始研究假设（人工设定，非市场一致预期）",
+      "notes": "SK hynix 为强周期存储公司，并以 NASDAQ:SKHY ADR 交易；1 ADS 对应 10 股韩国普通股。公司财务报表以 KRW 为主，报价以 USD 计。系统会暂停未换汇的 FCF DCF；在核验 Yahoo EPS 与 sharesOutstanding 的 ADR 单位口径前，不计算每 ADS 的 DCF/PE。若要启用 DCF，需补充经跨周期研究且已换算为 USD 的 normalized_fcf，并确认 ADS 股数口径。",
+      "scenarios": {
+        "bear": {
+          "fcf_growth": -0.05,
+          "terminal_growth": 0.015,
+          "fair_pe": 10,
+          "cost_of_equity": 0.12
+        },
+        "base": {
+          "fcf_growth": 0.08,
+          "terminal_growth": 0.02,
+          "fair_pe": 14,
+          "cost_of_equity": 0.11
+        },
+        "bull": {
+          "fcf_growth": 0.18,
+          "terminal_growth": 0.025,
+          "fair_pe": 18,
+          "cost_of_equity": 0.1
+        }
+      },
+      "per_share_basis_verified": false,
+      "per_share_basis_note": "SK hynix NASDAQ ADR：1 ADS 对应 10 股韩国普通股。Yahoo 的 forward EPS 和 sharesOutstanding 是否都以 1 ADS 为单位尚未完成核验；在确认前禁止计算每 ADS 的 DCF/PE。核验后再将 per_share_basis_verified 设为 true。",
+      "adr_underlying_shares_per_ads": 10
+    }
+  }
+}

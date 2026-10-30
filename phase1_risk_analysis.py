@@ -11,6 +11,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import math
+import os
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -20,7 +21,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent
 RAW_DIR = ROOT / "data" / "raw"
-OUT_DIR = ROOT / "outputs"
+OUT_DIR = Path(os.environ.get("PHASE1_OUTPUT_DIR", str(ROOT / "outputs"))).resolve()
 
 # Start with the three reference tickers. Add researched tickers only after this
 # first run works; use Yahoo Finance symbols, e.g. "GOOGL" for Alphabet Class A.

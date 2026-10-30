@@ -15,9 +15,10 @@ venv/
 data/private/*
 !data/private/.gitkeep
 
-# Downloaded market data and generated analysis outputs (keep directory placeholders)
+# Downloaded market data, financial snapshots, and generated analysis outputs
 data/raw/*.csv
 data/raw/*.meta.json
+data/fundamentals/*.json
 outputs/*
 !outputs/.gitkeep
 

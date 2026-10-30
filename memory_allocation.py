@@ -33,7 +33,7 @@ DEFAULT_SCENARIOS: dict[str, dict[str, float]] = {
     "direct_only": {"MU": 8.0, "SKHY": 8.0, "DRAM": 0.0},
 }
 # Indicative look-through exposure using the 2026-10-29 daily holdings file:
-# Micron direct + swap lines = 27.87%; SK hynix direct + swap lines = 21.14%.
+# Micron direct + swap lines = 27.87%; SK hynix direct + swap + ADR lines = 21.82%.
 # These are configuration assumptions, not fixed weights; refresh before trading.
 DEFAULT_DRAM_LOOKTHROUGH = {"MU": 0.2787, "SKHY": 0.2182}
 DEFAULT_LOOKTHROUGH_ASOF = "2026-10-29"
@@ -335,6 +335,26 @@ def analyze_memory_positions(
             })
     decision_table = pd.DataFrame(scenario_rows)
 
+    # Recalculate look-through issuer exposure for every proposed target mix.
+    # This is essential when a scenario preserves an ETF whose own holdings can
+    # already breach an issuer cap even after direct shares are reduced to zero.
+    scenario_lookthrough_exposures_pct: dict[str, dict[str, float]] = {}
+    scenario_issuer_limit_status: dict[str, dict[str, bool]] = {}
+    scenario_memory_weights_pct: dict[str, float] = {}
+    for scenario_name, targets in scenarios.items():
+        normalized_targets = {
+            ticker: float(targets.get(ticker, 0.0)) for ticker in MEMORY_TICKERS
+        }
+        scenario_memory_weights_pct[scenario_name] = sum(normalized_targets.values())
+        scenario_lookthrough_exposures_pct[scenario_name] = {
+            ticker: normalized_targets[ticker] + normalized_targets["DRAM"] * float(lookthrough[ticker])
+            for ticker in ("MU", "SKHY")
+        }
+        scenario_issuer_limit_status[scenario_name] = {
+            ticker: exposure > max_issuer_exposure_pct + 1e-9
+            for ticker, exposure in scenario_lookthrough_exposures_pct[scenario_name].items()
+        }
+
     issuer_alerts = [
         {
             "ticker": ticker,
@@ -384,6 +404,9 @@ def analyze_memory_positions(
         "lookthrough_issuer_weights_pct": issuer_weights,
         "issuer_alerts": issuer_alerts,
         "default_balanced_targets_pct": DEFAULT_TARGET_WEIGHTS_PCT,
+        "scenario_memory_weights_pct": scenario_memory_weights_pct,
+        "scenario_lookthrough_exposures_pct": scenario_lookthrough_exposures_pct,
+        "scenario_issuer_limit_status": scenario_issuer_limit_status,
         "decision_method_note": (
             "Position-sizing guardrails and trailing price diagnostics only. No company valuation, earnings forecast, "
             "or probability-of-return model is included. Target scenarios are editable policy assumptions, not optimized weights."

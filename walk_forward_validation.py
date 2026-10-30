@@ -16,7 +16,10 @@ from typing import Sequence
 
 import pandas as pd
 
-from backtest_engine import _metric_summary, generate_cross_sectional_momentum_weights, run_backtest
+from backtest_engine import (
+    _metric_summary, generate_cross_sectional_momentum_weights, load_risk_free_yield,
+    parse_rebalance_freqs, run_backtest,
+)
 from portfolio_risk import DEFAULT_OUTPUT_DIR, DEFAULT_PRICE_PANEL, TRADING_DAYS_PER_YEAR, load_price_panel
 from strategy_validation import parse_int_list, validate_parameter_grid
 
@@ -35,6 +38,8 @@ def run_walk_forward(
     slippage_bps: float = 5.0,
     periods_per_year: int = TRADING_DAYS_PER_YEAR,
     risk_free_rate_annual: float = 0.0,
+    risk_free_yield: pd.Series | None = None,
+    rebalance_freqs: Sequence[str] = ("daily",),
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, object]]:
     """Run a rolling parameter-selection process, testing each selection forward.
 
@@ -42,7 +47,7 @@ def run_walk_forward(
     Test windows are contiguous and non-overlapping. The strategy candidate set is
     fixed before running; parameters are reselected on each training fold only.
     """
-    validate_parameter_grid(lookbacks, skip_recents, top_ns)
+    validate_parameter_grid(lookbacks, skip_recents, top_ns, rebalance_freqs)
     for name, value in (("train_window", train_window), ("test_window", test_window)):
         if isinstance(value, bool) or not isinstance(value, int) or value < 2:
             raise ValueError(f"{name} must be an integer >= 2.")
@@ -51,11 +56,12 @@ def run_walk_forward(
     if benchmark not in adjusted_close.columns:
         raise ValueError(f"Benchmark '{benchmark}' is absent from the price panel.")
 
-    combos = list(itertools.product(lookbacks, skip_recents, top_ns))
-    strategy_returns: dict[tuple[int, int, int], pd.Series] = {}
-    benchmark_returns: dict[tuple[int, int, int], pd.Series] = {}
-    for lookback, skip_recent, top_n in combos:
-        key = (lookback, skip_recent, top_n)
+    combos = list(itertools.product(lookbacks, skip_recents, top_ns, rebalance_freqs))
+    strategy_returns: dict[tuple[int, int, int, str], pd.Series] = {}
+    benchmark_returns: dict[tuple[int, int, int, str], pd.Series] = {}
+    risk_free_returns: dict[tuple[int, int, int, str], pd.Series] = {}
+    for lookback, skip_recent, top_n, rebalance_freq in combos:
+        key = (lookback, skip_recent, top_n, rebalance_freq)
         try:
             target = generate_cross_sectional_momentum_weights(
                 adjusted_close, lookback=lookback, skip_recent=skip_recent,
@@ -66,9 +72,11 @@ def run_walk_forward(
                 transaction_cost_bps=transaction_cost_bps,
                 slippage_bps=slippage_bps, periods_per_year=periods_per_year,
                 risk_free_rate_annual=risk_free_rate_annual,
+                risk_free_yield=risk_free_yield, rebalance_freq=rebalance_freq,
             )
             strategy_returns[key] = daily["strategy_return"]
             benchmark_returns[key] = daily["benchmark_return"]
+            risk_free_returns[key] = daily["risk_free_return"]
         except (ValueError, KeyError, TypeError):
             # The fold loop will make insufficient/invalid parameter sets explicit.
             continue
@@ -92,6 +100,9 @@ def run_walk_forward(
         for key in strategy_returns
     }
     bench = benchmark_returns[next(iter(benchmark_returns))].reindex(common_index)
+    rf_daily = risk_free_returns[next(iter(risk_free_returns))].reindex(common_index)
+    if rf_daily.isna().any():
+        raise ValueError("Risk-free return series contains missing values in the common evaluation window.")
     if bench.isna().any():
         raise ValueError("Benchmark contains missing values in the common evaluation window.")
 
@@ -103,14 +114,17 @@ def run_walk_forward(
         fold_number += 1
         train_dates = common_index[test_start_pos - train_window:test_start_pos]
         test_dates = common_index[test_start_pos:test_start_pos + test_window]
-        scores: list[tuple[float, tuple[int, int, int], dict[str, object]]] = []
+        scores: list[tuple[float, tuple[int, int, int, str], dict[str, object]]] = []
         for key in combos:
             if key not in returns:
                 continue
             train = returns[key].reindex(train_dates)
             if train.isna().any() or len(train) < 2:
                 continue
-            metrics = _metric_summary(train, periods_per_year, risk_free_rate_annual)
+            metrics = _metric_summary(
+                train, periods_per_year, risk_free_rate_annual,
+                risk_free_daily_returns=rf_daily.reindex(train.index),
+            )
             score = metrics.get(selection_metric)
             if score is None or not pd.notna(score):
                 continue
@@ -142,8 +156,9 @@ def run_walk_forward(
             })
             test_start_pos += test_window
             continue
-        test_metrics = _metric_summary(test, periods_per_year, risk_free_rate_annual)
-        benchmark_metrics = _metric_summary(test_benchmark, periods_per_year, risk_free_rate_annual)
+        test_rf = rf_daily.reindex(test_dates)
+        test_metrics = _metric_summary(test, periods_per_year, risk_free_rate_annual, risk_free_daily_returns=test_rf)
+        benchmark_metrics = _metric_summary(test_benchmark, periods_per_year, risk_free_rate_annual, risk_free_daily_returns=test_rf)
         fold_rows.append({
             "fold": fold_number, "status": "OK",
             "train_start": train_dates.min().date().isoformat(),
@@ -154,6 +169,7 @@ def run_walk_forward(
             "selected_lookback": selected_key[0],
             "selected_skip_recent": selected_key[1],
             "selected_top_n": selected_key[2],
+            "selected_rebalance_freq": selected_key[3],
             "selection_metric": selection_metric,
             "training_selection_score": best_score,
             "train_total_return": train_metrics["total_return"],
@@ -174,6 +190,8 @@ def run_walk_forward(
             "selected_lookback": selected_key[0],
             "selected_skip_recent": selected_key[1],
             "selected_top_n": selected_key[2],
+            "selected_rebalance_freq": selected_key[3],
+            "risk_free_return": test_rf,
         }, index=test_dates)
         oos_chunks.append(fold_oos)
         test_start_pos += test_window
@@ -188,6 +206,8 @@ def run_walk_forward(
         "train_window_observations": train_window,
         "test_window_observations": test_window,
         "requested_combinations": len(combos),
+        "rebalance_freqs": list(rebalance_freqs),
+        "risk_free_rate_source": "dated annualized yield series" if risk_free_yield is not None else "constant annual rate",
         "usable_combinations": len(strategy_returns),
         "folds_total": int(len(folds)),
         "folds_successful": int(len(successful)),
@@ -198,8 +218,9 @@ def run_walk_forward(
         "selection_warning": "Parameters are selected on prior training windows only. Walk-forward tests remain subject to multiple-testing bias and do not replace a final untouched holdout.",
     }
     if not oos.empty:
-        strategy_metrics = _metric_summary(oos["strategy_return"], periods_per_year, risk_free_rate_annual)
-        benchmark_metrics = _metric_summary(oos["benchmark_return"], periods_per_year, risk_free_rate_annual)
+        oos_rf = oos["risk_free_return"]
+        strategy_metrics = _metric_summary(oos["strategy_return"], periods_per_year, risk_free_rate_annual, risk_free_daily_returns=oos_rf)
+        benchmark_metrics = _metric_summary(oos["benchmark_return"], periods_per_year, risk_free_rate_annual, risk_free_daily_returns=oos_rf)
         summary["out_of_sample_strategy"] = strategy_metrics
         summary["out_of_sample_benchmark"] = benchmark_metrics
         summary["out_of_sample_excess_total_return"] = strategy_metrics["total_return"] - benchmark_metrics["total_return"]
@@ -213,6 +234,8 @@ def main() -> None:
     parser.add_argument("--lookbacks", type=parse_int_list, default=[63, 126, 252])
     parser.add_argument("--skip-recents", type=parse_int_list, default=[5, 21])
     parser.add_argument("--top-ns", type=parse_int_list, default=[1, 2, 3])
+    parser.add_argument("--rebalance-freqs", type=parse_rebalance_freqs, default=["daily", "weekly", "monthly"])
+    parser.add_argument("--risk-free-yield-csv", type=Path, help="CSV with Date,annual_yield (decimal annualized yield)")
     parser.add_argument("--train-window", type=int, default=252)
     parser.add_argument("--test-window", type=int, default=63)
     parser.add_argument("--selection-metric", choices=["sharpe_ratio", "annualized_return", "sortino_ratio"], default="sharpe_ratio")
@@ -222,13 +245,14 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     args = parser.parse_args()
     prices = load_price_panel(args.prices)
+    risk_free_yield = load_risk_free_yield(args.risk_free_yield_csv) if args.risk_free_yield_csv else None
     folds, oos, summary = run_walk_forward(
         prices, benchmark=args.benchmark, lookbacks=args.lookbacks,
-        skip_recents=args.skip_recents, top_ns=args.top_ns,
+        skip_recents=args.skip_recents, top_ns=args.top_ns, rebalance_freqs=args.rebalance_freqs,
         train_window=args.train_window, test_window=args.test_window,
         selection_metric=args.selection_metric,
         transaction_cost_bps=args.transaction_cost_bps, slippage_bps=args.slippage_bps,
-        risk_free_rate_annual=args.risk_free_rate,
+        risk_free_rate_annual=args.risk_free_rate, risk_free_yield=risk_free_yield,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     folds.to_csv(args.output_dir / "walk_forward_folds.csv", index=False, float_format="%.10f")
