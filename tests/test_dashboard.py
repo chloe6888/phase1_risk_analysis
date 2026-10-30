@@ -154,6 +154,61 @@ def test_display_frame_localizes_walk_forward_status_and_parameters() -> None:
     assert shown["参数选择指标"].tolist() == ["夏普比率", "年化收益率"]
 
 
+def test_plain_language_summaries_explain_oos_risk_and_holdings() -> None:
+    walk = {
+        "folds_successful": 3,
+        "folds_total": 4,
+        "oos_observations": 189,
+        "out_of_sample_strategy": {"total_return": 0.18},
+        "out_of_sample_benchmark": {"total_return": 0.12},
+        "out_of_sample_excess_total_return": 0.06,
+    }
+    walk_text = app._walk_forward_plain_language(walk)
+    assert walk_text is not None
+    assert "策略累计收益 18.00%" in walk_text
+    assert "基准 12.00%" in walk_text
+    assert "高约 6.00 个百分点" in walk_text
+    assert "不是未来收益预测" in walk_text
+
+    portfolio = {"annualized_volatility": 0.2, "max_drawdown": -0.25}
+    contributions = pd.DataFrame(
+        {"percentage_of_portfolio_volatility": [0.7, 0.3]},
+        index=pd.Index(["MU", "SPY"], name="asset"),
+    )
+    risk_text = app._portfolio_risk_plain_language(portfolio, contributions)
+    assert risk_text is not None
+    assert "年化波动约为 20.0%" in risk_text
+    assert "最大回撤约为 25.0%" in risk_text
+    assert "MU" in risk_text
+    assert "70.0%" in risk_text
+
+    holdings_text = app._holdings_plain_language({
+        "largest_position_ticker": "MU",
+        "largest_position_weight_pct": 42.0,
+        "largest_risk_group": "semiconductor",
+        "largest_risk_group_weight_pct": 70.0,
+    }, [{"name": "MU", "weight_pct": 42.0}])
+    assert holdings_text is not None
+    assert "MU" in holdings_text
+    assert "42.0%" in holdings_text
+    assert "1 项集中度提醒" in holdings_text
+
+
+def test_signed_delta_text_keeps_direction_visible_without_color() -> None:
+    assert app._signed_delta_text(0.025) == "↑ +2.50 个百分点 vs 基准"
+    assert app._signed_delta_text(-0.01) == "↓ -1.00 个百分点 vs 基准"
+    assert app._signed_delta_text(0.0) == "→ 0.00 个百分点 vs 基准"
+    assert app._signed_delta_text(None) is None
+
+
+def test_risk_metric_explanations_include_examples_and_beta_limit() -> None:
+    explanations = app.RISK_METRIC_EXPLANATIONS
+    assert "从 100 降到 80" in explanations["最大回撤"]
+    assert "95% VaR" in explanations["单期 VaR"]
+    assert "最差约 5%" in explanations["单期 CVaR"]
+    assert "Beta 为 1.2" in explanations["Beta（贝塔）"]
+
+
 def test_display_frame_translates_common_columns_and_actions() -> None:
     frame = pd.DataFrame({
         "ticker": ["MU"],
