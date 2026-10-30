@@ -141,6 +141,8 @@ def fetch_yahoo_snapshot(ticker: str, ticker_factory: Callable[[str], Any] | Non
         if price is not None:
             price_date = _date_from_epoch(info.get("regularMarketTime"))
     currency = str(info.get("currency") or info.get("financialCurrency") or "USD").upper()
+    financial_currency = str(info.get("financialCurrency") or currency).upper()
+    currency_mismatch = currency != financial_currency
     shares = _number(info.get("sharesOutstanding") or info.get("impliedSharesOutstanding"))
     cash = _number(info.get("totalCash"))
     debt = _number(info.get("totalDebt"))
@@ -207,6 +209,8 @@ def fetch_yahoo_snapshot(ticker: str, ticker_factory: Callable[[str], Any] | Non
         "ticker": symbol,
         "company_name": info.get("shortName") or info.get("longName") or symbol,
         "currency": currency,
+        "financial_currency": financial_currency,
+        "currency_mismatch": currency_mismatch,
         "current_price": price,
         "price_date": price_date,
         "fetched_at_utc": fetched_at,
