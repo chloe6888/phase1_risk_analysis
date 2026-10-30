@@ -14,6 +14,7 @@ import pandas as pd
 
 from portfolio_risk import DEFAULT_OUTPUT_DIR, load_price_panel, parse_scenario
 from strategy_validation import parse_int_list
+from backtest_engine import load_risk_free_yield, parse_rebalance_freqs
 from holdings_manager import load_holdings, summarize_holdings, weights_from_price_panel, risk_guardrail_alerts, reconcile_snapshot
 from memory_allocation import analyze_memory_positions
 
@@ -279,6 +280,9 @@ def main() -> None:
     parser.add_argument("--backtest-lookback", type=int, default=126)
     parser.add_argument("--backtest-skip-recent", type=int, default=21)
     parser.add_argument("--backtest-top-n", type=int, default=2)
+    parser.add_argument("--backtest-rebalance-freq", choices=["daily", "weekly", "monthly"], default="daily")
+    parser.add_argument("--rebalance-freqs", type=parse_rebalance_freqs, default=["daily", "weekly", "monthly"])
+    parser.add_argument("--risk-free-yield-csv", type=Path, help="CSV with Date,annual_yield (decimal annualized yield)")
     parser.add_argument("--train-window", type=int, default=252)
     parser.add_argument("--test-window", type=int, default=63)
     parser.add_argument("--selection-metric", choices=["sharpe_ratio", "annualized_return", "sortino_ratio"], default="sharpe_ratio")
@@ -294,6 +298,8 @@ def main() -> None:
         parser.error("Provide exactly one of --weights or --holdings-csv.")
     if args.holdings_csv is not None and not args.holdings_csv.is_file():
         parser.error(f"Holdings CSV does not exist: {args.holdings_csv}")
+    if args.risk_free_yield_csv is not None and not args.risk_free_yield_csv.is_file():
+        parser.error(f"Risk-free yield CSV does not exist: {args.risk_free_yield_csv}")
     if args.max_cache_age_hours <= 0:
         parser.error("--max-cache-age-hours must be positive.")
     if args.transaction_cost_bps < 0 or args.slippage_bps < 0:
@@ -304,6 +310,7 @@ def main() -> None:
         parser.error("Train and test windows must be at least two observations.")
 
     py = sys.executable
+    risk_free_yield = load_risk_free_yield(args.risk_free_yield_csv) if args.risk_free_yield_csv else None
     imported_holdings = load_holdings(args.holdings_csv) if args.holdings_csv else None
     data_cmd = [py, str(ROOT / "phase1_risk_analysis.py"), "--max-cache-age-hours", str(args.max_cache_age_hours)]
     if imported_holdings is not None:
@@ -373,28 +380,39 @@ def main() -> None:
     backtest_cmd = [
         py, str(ROOT / "backtest_engine.py"), "--benchmark", args.benchmark,
         "--lookback", str(args.backtest_lookback), "--skip-recent", str(args.backtest_skip_recent),
-        "--top-n", str(args.backtest_top_n), "--transaction-cost-bps", str(args.transaction_cost_bps),
+        "--top-n", str(args.backtest_top_n), "--rebalance-freq", args.backtest_rebalance_freq,
+        "--transaction-cost-bps", str(args.transaction_cost_bps),
         "--slippage-bps", str(args.slippage_bps), "--risk-free-rate", str(args.risk_free_rate),
     ]
+    if args.risk_free_yield_csv:
+        backtest_cmd += ["--risk-free-yield-csv", str(args.risk_free_yield_csv)]
     run_step("3/5 Baseline backtest", backtest_cmd)
 
     grid_cmd = [
         py, str(ROOT / "strategy_validation.py"), "--benchmark", args.benchmark, "--test-start", args.test_start,
         "--lookbacks", ",".join(map(str, args.lookbacks)), "--skip-recents", ",".join(map(str, args.skip_recents)),
-        "--top-ns", ",".join(map(str, args.top_ns)), "--transaction-cost-bps", str(args.transaction_cost_bps),
+        "--top-ns", ",".join(map(str, args.top_ns)),
+        "--rebalance-freqs", ",".join(args.rebalance_freqs),
+        "--transaction-cost-bps", str(args.transaction_cost_bps),
         "--slippage-bps", str(args.slippage_bps), "--risk-free-rate", str(args.risk_free_rate),
     ]
+    if args.risk_free_yield_csv:
+        grid_cmd += ["--risk-free-yield-csv", str(args.risk_free_yield_csv)]
     run_step("4/5 Parameter sensitivity and single split", grid_cmd)
 
     if not args.skip_walk_forward:
         walk_cmd = [
             py, str(ROOT / "walk_forward_validation.py"), "--benchmark", args.benchmark,
             "--lookbacks", ",".join(map(str, args.lookbacks)), "--skip-recents", ",".join(map(str, args.skip_recents)),
-            "--top-ns", ",".join(map(str, args.top_ns)), "--train-window", str(args.train_window),
+            "--top-ns", ",".join(map(str, args.top_ns)),
+            "--rebalance-freqs", ",".join(args.rebalance_freqs),
+            "--train-window", str(args.train_window),
             "--test-window", str(args.test_window), "--selection-metric", args.selection_metric,
             "--transaction-cost-bps", str(args.transaction_cost_bps), "--slippage-bps", str(args.slippage_bps),
             "--risk-free-rate", str(args.risk_free_rate),
         ]
+        if args.risk_free_yield_csv:
+            walk_cmd += ["--risk-free-yield-csv", str(args.risk_free_yield_csv)]
         run_step("5/5 Rolling walk-forward validation", walk_cmd)
 
     report_path = write_report(OUTPUT_DIR, weights=weights_text, benchmark=args.benchmark)
@@ -404,7 +422,11 @@ def main() -> None:
         "parameters": {
             "lookbacks": args.lookbacks, "skip_recents": args.skip_recents, "top_ns": args.top_ns,
             "backtest_lookback": args.backtest_lookback, "backtest_skip_recent": args.backtest_skip_recent,
-            "backtest_top_n": args.backtest_top_n, "train_window": args.train_window, "test_window": args.test_window,
+            "backtest_top_n": args.backtest_top_n, "backtest_rebalance_freq": args.backtest_rebalance_freq,
+            "rebalance_freqs": args.rebalance_freqs,
+            "risk_free_yield_csv": str(args.risk_free_yield_csv) if args.risk_free_yield_csv else None,
+            "risk_free_rate_source": "dated annualized yield series" if risk_free_yield is not None else "constant annual rate",
+            "train_window": args.train_window, "test_window": args.test_window,
             "selection_metric": args.selection_metric, "transaction_cost_bps": args.transaction_cost_bps,
             "slippage_bps": args.slippage_bps, "risk_free_rate": args.risk_free_rate,
             "has_portfolio_value": args.portfolio_value is not None,
