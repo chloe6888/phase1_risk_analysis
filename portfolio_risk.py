@@ -116,6 +116,22 @@ def max_drawdown_series(returns: pd.Series) -> pd.DataFrame:
     return pd.DataFrame({"portfolio_wealth_index": wealth, "running_peak": running_peak, "drawdown": drawdown})
 
 
+def load_risk_free_yield(path: Path) -> pd.Series:
+    """Load Date,annual_yield CSV; annual_yield is a decimal annualized yield."""
+    frame = pd.read_csv(path)
+    required = {"Date", "annual_yield"}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise ValueError(f"Risk-free yield CSV is missing required columns: {missing}")
+    dates = pd.to_datetime(frame["Date"], errors="coerce")
+    values = pd.to_numeric(frame["annual_yield"], errors="coerce")
+    if dates.isna().any() or dates.duplicated().any():
+        raise ValueError("Risk-free yield CSV must have valid, unique Date values.")
+    if values.isna().any() or not np.isfinite(values.to_numpy(dtype=float)).all() or (values <= -1).any():
+        raise ValueError("annual_yield values must be finite decimals greater than -1.")
+    return pd.Series(values.to_numpy(dtype=float), index=pd.DatetimeIndex(dates), name="annual_yield").sort_index()
+
+
 def calculate_portfolio_risk(
     adjusted_close: pd.DataFrame,
     weights: Mapping[str, float] | pd.Series,
@@ -123,6 +139,7 @@ def calculate_portfolio_risk(
     periods_per_year: int = TRADING_DAYS_PER_YEAR,
     confidence_level: float = 0.95,
     risk_free_rate_annual: float = 0.0,
+    risk_free_yield: pd.Series | None = None,
 ) -> tuple[dict[str, object], pd.DataFrame, pd.DataFrame, pd.Series]:
     """Calculate portfolio metrics, risk contributions, returns and drawdowns.
 
@@ -143,9 +160,26 @@ def calculate_portfolio_risk(
     annualized_return = total_growth ** (periods_per_year / observations) - 1.0 if total_growth > 0 else None
     daily_volatility = float(portfolio_returns.std(ddof=1))
     annualized_volatility = daily_volatility * math.sqrt(periods_per_year)
-    daily_rf = (1.0 + risk_free_rate_annual) ** (1.0 / periods_per_year) - 1.0
+    if risk_free_yield is None:
+        daily_rf: float | pd.Series = (1.0 + risk_free_rate_annual) ** (1.0 / periods_per_year) - 1.0
+        risk_free_source = "constant annual rate"
+    else:
+        yields = pd.to_numeric(risk_free_yield.copy(), errors="coerce")
+        yields.index = pd.to_datetime(yields.index)
+        if yields.index.has_duplicates or yields.isna().any() or not np.isfinite(yields.to_numpy(dtype=float)).all() or (yields <= -1).any():
+            raise ValueError("Risk-free annualized yields must have unique dates and finite decimals greater than -1.")
+        aligned_yields = yields.sort_index().reindex(portfolio_returns.index).ffill()
+        if aligned_yields.isna().any():
+            first_missing = aligned_yields.index[aligned_yields.isna()][0].date().isoformat()
+            raise ValueError(f"Risk-free yield series does not cover portfolio return date {first_missing}.")
+        daily_rf = pd.Series(
+            np.power(1.0 + aligned_yields, 1.0 / periods_per_year) - 1.0,
+            index=portfolio_returns.index,
+        )
+        risk_free_source = "dated annualized yield series"
     excess = portfolio_returns - daily_rf
-    sharpe = float(excess.mean() / daily_volatility * math.sqrt(periods_per_year)) if daily_volatility > 0 else None
+    excess_volatility = float(excess.std(ddof=1)) if len(excess) >= 2 else 0.0
+    sharpe = float(excess.mean() / excess_volatility * math.sqrt(periods_per_year)) if excess_volatility > 0 else None
     downside_deviation = float(np.sqrt(np.square(np.minimum(excess, 0.0)).mean()))
     sortino = float(excess.mean() / downside_deviation * math.sqrt(periods_per_year)) if downside_deviation > 0 else None
     max_drawdown = float(drawdown["drawdown"].min())
@@ -187,6 +221,7 @@ def calculate_portfolio_risk(
         "periods_per_year": periods_per_year,
         "confidence_level": confidence_level,
         "risk_free_rate_annual": risk_free_rate_annual,
+        "risk_free_rate_source": risk_free_source,
         "normalized_weights": {str(key): float(value) for key, value in active_weights.items()},
         "total_return": total_growth - 1.0,
         "annualized_return": annualized_return,
@@ -201,7 +236,10 @@ def calculate_portfolio_risk(
         "historical_var_horizon": "one observed return interval",
         "risk_model_note": "Historical statistics; target weights are assumed to be rebalanced every observed return interval.",
     }
-    daily_returns = pd.concat([asset_returns, portfolio_returns], axis=1)
+    daily_returns = pd.concat([
+        asset_returns, portfolio_returns,
+        pd.Series(daily_rf, index=portfolio_returns.index, name="risk_free_return"),
+    ], axis=1)
     daily_returns.index.name = "Date"
     drawdown.index.name = "Date"
     return summary, contributions, drawdown, daily_returns
@@ -332,7 +370,8 @@ def main() -> None:
     parser.add_argument("--weights", required=True, type=parse_weights, help="Target weights, e.g. GOOGL=0.6,SPY=0.4")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--confidence-level", type=float, default=0.95, help="Historical VaR/CVaR confidence level")
-    parser.add_argument("--risk-free-rate", type=float, default=0.0, help="Annual risk-free rate as decimal, e.g. 0.04")
+    parser.add_argument("--risk-free-rate", type=float, default=0.0, help="Fallback annual risk-free rate as decimal, e.g. 0.04")
+    parser.add_argument("--risk-free-yield-csv", type=Path, help="CSV with Date,annual_yield (decimal annualized yield)")
     parser.add_argument("--window", type=int, action="append", dest="windows",
                         help="Rolling window in observations; repeat to add windows (default: 20, 60, 120)")
     parser.add_argument("--portfolio-value", type=float, help="Optional portfolio market value for stress-test dollar impacts")
@@ -341,9 +380,10 @@ def main() -> None:
     args = parser.parse_args()
 
     prices = load_price_panel(args.prices)
+    risk_free_yield = load_risk_free_yield(args.risk_free_yield_csv) if args.risk_free_yield_csv else None
     summary, contributions, drawdown, daily_returns = calculate_portfolio_risk(
         prices, args.weights, confidence_level=args.confidence_level,
-        risk_free_rate_annual=args.risk_free_rate,
+        risk_free_rate_annual=args.risk_free_rate, risk_free_yield=risk_free_yield,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     daily_returns_count = int(daily_returns["portfolio_return"].notna().sum())
