@@ -184,10 +184,15 @@ def validate_fundamentals_snapshot(
     if eps is None or eps <= 0:
         add("FORWARD_EPS_UNAVAILABLE", "BLOCKER", "No positive forward EPS is available.", ("pe",))
     eps_source = str(snapshot.get("eps_source") or "").lower()
-    if "trailing" in eps_source and "forward" not in eps_source:
+    trailing_eps_fallback = "trailing" in eps_source and (
+        "fallback" in eps_source
+        or "unavailable" in eps_source
+        or "substitut" in eps_source
+    )
+    if trailing_eps_fallback:
         add(
             "TRAILING_EPS_FALLBACK", "BLOCKER",
-            "The provider substituted trailing EPS; this does not satisfy the forward-PE input requirement.",
+            "The provider substituted trailing EPS because forward EPS is unavailable; this does not satisfy the forward-PE input requirement.",
             ("pe",),
         )
     if fcf is None or fcf <= 0:
