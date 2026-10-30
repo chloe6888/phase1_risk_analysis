@@ -39,6 +39,7 @@ def test_stability_analysis_compares_three_cadences_with_same_baseline_signals()
     assert set(cadence["rebalance_freq"]) == {"daily", "weekly", "monthly"}
     assert len(cadence) == 3
     assert cadence["observations"].nunique() == 1
+    assert cadence["start_date"].nunique() == 1
     assert {"new_total_return", "legacy_total_return", "new_minus_legacy_total_return",
             "total_cost_drag", "terminal_liquidation_cost"}.issubset(cadence.columns)
     assert (cadence["terminal_liquidation_cost"] >= 0).all()
