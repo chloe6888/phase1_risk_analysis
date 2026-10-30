@@ -154,10 +154,11 @@ def render_task_monitor() -> None:
         task_id = str(task.get("task_id", "unknown"))
         step = str(task.get("current_step") or "后台准备中")
         message = str(task.get("message") or "")
+        task_label = "个股估值" if task.get("task_type") == "valuation" else "组合研究"
         if state in {"queued", "running"}:
-            st.info(f"研究任务运行中 · {step}。页面可以继续浏览，已有成功报告不会被覆盖。")
+            st.info(f"{task_label}任务运行中 · {step}。页面可以继续浏览，上一次成功结果不会被覆盖。")
         elif state == "succeeded":
-            st.success(f"最近一次研究任务已成功 · {task.get('finished_at', '')}")
+            st.success(f"最近一次{task_label}任务已成功 · {task.get('finished_at', '')}")
             loaded = st.session_state.get("loaded_task_id")
             if loaded != task_id:
                 st.session_state["loaded_task_id"] = task_id
@@ -185,6 +186,7 @@ def main() -> None:
 
     output_dir = active_output_dir(ROOT)
     status = output_status(output_dir)
+    valuation_output_dir = active_output_dir(ROOT, task_type="valuation")
     st.markdown("### 研究任务")
     render_task_monitor()
     with st.sidebar:
@@ -321,8 +323,8 @@ def main() -> None:
             f"有效收益观测：{portfolio.get('observations', 'N/A')}"
         )
 
-    overview_tab, risk_tab, backtest_tab, validation_tab, memory_tab, files_tab = st.tabs(
-        ["账户总览", "组合风险", "策略表现", "策略稳健性", "存储主题", "研究报告"]
+    overview_tab, risk_tab, backtest_tab, validation_tab, memory_tab, valuation_tab, files_tab = st.tabs(
+        ["账户总览", "组合风险", "策略表现", "策略稳健性", "存储主题", "个股估值", "研究报告"]
     )
     with overview_tab:
         latest_holdings = read_csv(output_dir / "holdings_valuation.csv")
@@ -491,6 +493,68 @@ def main() -> None:
         st.warning(
             "默认权重是可修改的风险预算假设，不是回测优化结果。交易前仍需核对基本面、估值、最新 ETF 持仓以及现金/融资情况。"
         )
+
+    with valuation_tab:
+        st.markdown("### 个股基本面估值")
+        st.caption("DCF 与 PE 是独立的情景估值交叉检查。默认假设是可编辑的研究起点，不是分析师一致预期；系统不发送订单。")
+        valuation_symbols = st.multiselect(
+            "选择需要研究的股票",
+            options=["GOOG", "NVDA", "MU", "SKHY"],
+            default=["GOOG", "NVDA", "MU", "SKHY"],
+            key="valuation_symbols",
+        )
+        force_valuation_refresh = st.checkbox(
+            "强制刷新财务与行情数据",
+            value=False,
+            key="force_valuation_refresh",
+            help="默认使用不超过 7 天的本地数据缓存。",
+        )
+        if st.button("运行估值分析", type="primary", disabled=not valuation_symbols, key="run_valuation"):
+            command = [sys.executable, str(ROOT / "run_valuation.py"), "--tickers", ",".join(valuation_symbols)]
+            if force_valuation_refresh:
+                command.append("--refresh")
+            try:
+                task = start_task(command, repository_root=ROOT, task_type="valuation")
+                st.success(f"估值任务已提交：{task['task_id']}。可以继续浏览旧估值结果。")
+                st.rerun()
+            except TaskAlreadyRunning as exc:
+                st.warning(str(exc))
+            except Exception as exc:
+                st.error(f"无法启动估值任务：{type(exc).__name__}: {exc}")
+
+        valuation_summary = read_csv(valuation_output_dir / "valuation_summary.csv")
+        if valuation_summary is not None and not valuation_summary.empty:
+            st.markdown("#### 各股票估值对照")
+            preferred = [
+                "ticker", "current_price", "price_date", "dcf_bear", "dcf_base", "dcf_bull",
+                "pe_bear", "pe_base", "pe_bull", "dcf_buy_below", "pe_buy_below",
+                "dcf_sell_review_above", "pe_sell_review_above", "dcf_view", "pe_view",
+                "overall_confidence", "data_quality",
+            ]
+            shown = [name for name in preferred if name in valuation_summary.columns]
+            st.dataframe(valuation_summary[shown], hide_index=True, use_container_width=True)
+            st.caption("价格单位沿用各证券交易币种；买入观察线与卖出复核线来自基准情景和安全边际/溢价假设，不是交易指令。")
+
+            selected_report = st.selectbox(
+                "查看单只股票研究说明",
+                options=valuation_summary["ticker"].astype(str).tolist(),
+                key="valuation_report_ticker",
+            )
+            selected_row = valuation_summary[valuation_summary["ticker"].astype(str) == selected_report].iloc[0]
+            st.markdown(f"#### {selected_report} 数据质量与估值限制")
+            st.write(f"数据源：{selected_row.get('data_source', 'N/A')}；报价日期：{selected_row.get('price_date', 'N/A')}；财务期间：{selected_row.get('financial_period', 'N/A')}")
+            st.write(f"置信度：{selected_row.get('overall_confidence', 'low')}")
+            st.warning(str(selected_row.get("limitations", "估值依赖输入假设，请核验数据。")))
+            st.markdown("#### 完整估值报告")
+            valuation_report_path = valuation_output_dir / "valuation_report.md"
+            if valuation_report_path.is_file():
+                st.markdown(valuation_report_path.read_text(encoding="utf-8"))
+        else:
+            st.info("还没有估值结果。选择 GOOG、NVDA、MU 或 SKHY，点击「运行估值分析」开始。")
+
+        st.markdown("#### 修改估值假设")
+        st.code("config/valuation_assumptions.json", language="text")
+        st.caption("熊/基准/牛市的 FCF 增长、股权资本成本、终值增长率、PE 倍数和安全边际都可编辑。修改后重新运行估值。")
 
     with files_tab:
         st.markdown("### 研究产物状态")
