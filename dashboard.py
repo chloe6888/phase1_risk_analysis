@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "outputs"
 PIPELINE_SCRIPT = ROOT / "run_research.py"
 PRIVATE_HOLDINGS_PATH = ROOT / "data" / "private" / "holdings_snapshot.csv"
+MIN_RISK_HISTORY_OBSERVATIONS = 252
 
 
 def read_json(path: str | Path) -> dict[str, Any] | None:
@@ -192,6 +193,9 @@ COLUMN_LABELS = {
     "selected_lookback": "选中回看窗口",
     "selected_skip_recent": "选中跳过窗口",
     "selected_top_n": "选中持仓数量",
+    "selected_rebalance_freq": "选中调仓频率",
+    "selection_metric": "参数选择指标",
+    "reason": "跳过原因",
     "train_start": "训练开始日期",
     "train_end": "训练结束日期",
     "test_start": "测试开始日期",
@@ -237,6 +241,13 @@ VALUE_LABELS = {
     "WITHIN_MEMORY_LIMIT": "存储主题仓位在限制内",
     "OK": "通过",
     "SKIP": "跳过",
+    "SKIPPED": "数据不足，已跳过",
+    "daily": "每日",
+    "weekly": "每周",
+    "monthly": "每月",
+    "sharpe_ratio": "夏普比率",
+    "annualized_return": "年化收益率",
+    "sortino_ratio": "索提诺比率",
 }
 FILE_LABELS = {
     "analysis_metadata.json": "行情数据与更新时间",
@@ -275,13 +286,57 @@ def _number(value: Any, digits: int = 2) -> str:
     return f"{float(value):,.{digits}f}"
 
 
+def _short_history_warning(observations: Any) -> str | None:
+    """Explain when annualized risk metrics rely on fewer than one trading year."""
+    count_value = _float_or_none(observations)
+    if count_value is None:
+        return None
+    count = int(count_value)
+    if count >= MIN_RISK_HISTORY_OBSERVATIONS:
+        return None
+    return (
+        f"历史样本偏短：目前只有 {count} 个共同收益观测，少于 "
+        f"{MIN_RISK_HISTORY_OBSERVATIONS} 个交易日。年化波动率、夏普比率等统计量"
+        "可能对个别行情阶段较敏感，建议补充历史数据后再判断风险水平。"
+    )
+
+
+def _safe_count(value: Any) -> int:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0
+    return int(number) if math.isfinite(number) else 0
+
+
+def _walk_forward_overview(walk: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Normalize walk-forward summary fields for the overview page."""
+    if not walk:
+        return None
+    strategy = walk.get("out_of_sample_strategy")
+    benchmark = walk.get("out_of_sample_benchmark")
+    strategy = strategy if isinstance(strategy, dict) else {}
+    benchmark = benchmark if isinstance(benchmark, dict) else {}
+    return {
+        "folds_successful": _safe_count(walk.get("folds_successful")),
+        "folds_total": _safe_count(walk.get("folds_total")),
+        "oos_observations": _safe_count(walk.get("oos_observations")),
+        "first_oos_date": walk.get("first_oos_date"),
+        "last_oos_date": walk.get("last_oos_date"),
+        "strategy_total_return": strategy.get("total_return"),
+        "benchmark_total_return": benchmark.get("total_return"),
+        "excess_total_return": walk.get("out_of_sample_excess_total_return"),
+        "selection_warning": walk.get("selection_warning"),
+    }
+
+
 def _display_frame(frame: pd.DataFrame | None) -> pd.DataFrame | None:
     """Return a presentation-only Chinese copy; never mutate stored research data."""
     if frame is None:
         return None
     result = frame.copy()
     result = result.rename(columns={key: value for key, value in COLUMN_LABELS.items() if key in result.columns})
-    for column in ("方案", "建议动作", "验证状态", "加仓条件检查", "趋势状态"):
+    for column in ("方案", "建议动作", "验证状态", "加仓条件检查", "趋势状态", "选中调仓频率", "参数选择指标"):
         if column in result.columns:
             result[column] = result[column].replace(VALUE_LABELS)
     if "判断依据" in result.columns:
@@ -766,6 +821,42 @@ def main() -> None:
                 st.info("按当前导入持仓和默认集中度阈值，暂未触发单一持仓、风险主题或行业集中度提醒。")
         else:
             st.info("尚未导入持仓快照。可以先上传 CSV，或只用组合权重运行历史风险研究。")
+
+        # Put genuinely out-of-sample evidence before the full-period historical backtest.
+        st.markdown("### 策略可靠性：滚动样本外验证")
+        walk_overview = _walk_forward_overview(walk)
+        if walk_overview is None:
+            st.info("尚无滚动样本外验证结果。完成一次包含 walk-forward 的研究后，这里会优先展示逐轮训练、逐段检验的结果。")
+        elif walk_overview["oos_observations"] > 0:
+            oos_cols = st.columns(3)
+            oos_cols[0].metric(
+                "样本外策略累计收益",
+                _pct(walk_overview["strategy_total_return"]),
+                help="每轮只用此前训练区间选择参数，再应用到后续检验区间；仍是历史结果，不代表未来。",
+            )
+            oos_cols[1].metric(
+                "样本外基准累计收益",
+                _pct(walk_overview["benchmark_total_return"]),
+            )
+            oos_cols[2].metric(
+                "样本外相对基准差值",
+                _pct(walk_overview["excess_total_return"]),
+                help="样本外策略累计收益减去同一检验区间的基准累计收益。",
+            )
+            st.caption(
+                f"成功验证 {walk_overview['folds_successful']} / {walk_overview['folds_total']} 轮 · "
+                f"样本外观测 {walk_overview['oos_observations']} 个交易日 · "
+                f"区间 {walk_overview['first_oos_date'] or '暂无'} 至 "
+                f"{walk_overview['last_oos_date'] or '暂无'}"
+            )
+            if walk_overview["selection_warning"]:
+                st.warning("样本外结果仍受多重参数检验影响，不能替代最终未触碰的独立留出区间。避免根据检验期表现反复调参。")
+        else:
+            st.warning(
+                f"滚动验证已运行，但目前没有成功的样本外观测（成功 {walk_overview['folds_successful']} / "
+                f"{walk_overview['folds_total']} 轮）。请检查历史数据长度和每轮训练/检验窗口。"
+            )
+
         if portfolio:
             risk_snapshot_cols = st.columns(3)
             risk_snapshot_cols[0].metric("历史最大回撤", _pct(portfolio.get("max_drawdown")), help="历史区间中从高点到随后低点的最大跌幅，不是未来损失上限。")
@@ -781,6 +872,9 @@ def main() -> None:
                 f"统计区间：{portfolio.get('start_date', '暂无')} 至 {portfolio.get('end_date', '暂无')} · "
                 f"有效收益观测：{portfolio.get('observations', '暂无')} 个交易日"
             )
+            short_history_warning = _short_history_warning(portfolio.get("observations"))
+            if short_history_warning:
+                st.warning(short_history_warning)
         if imported_positions is not None and not imported_positions.empty:
             st.markdown("### 已导入持仓")
             st.caption("下表的价格来自导入文件中的截图参考价；研究运行成功后，可在估值文件中查看行情数据源的最近收盘价。")
@@ -871,6 +965,9 @@ def main() -> None:
             risk_cols[1].metric("最大回撤", _pct(portfolio.get("max_drawdown")))
             risk_cols[2].metric("夏普比率", _number(portfolio.get("sharpe_ratio")), help="单位风险对应的历史超额收益表现，数值越高不代表未来一定更好。")
             risk_cols[3].metric("索提诺比率", _number(portfolio.get("sortino_ratio")), help="侧重下行波动的历史风险调整收益指标。")
+            short_history_warning = _short_history_warning(portfolio.get("observations"))
+            if short_history_warning:
+                st.warning(short_history_warning)
             st.caption("VaR 是基于历史样本估算的单期损失分位数；CVaR 是落入尾部情形时的平均损失估计。二者都不是最大亏损保证。")
             risk_table = pd.DataFrame([
                 {"指标": "累计收益率", "数值": _pct(portfolio.get("total_return"))},
@@ -930,8 +1027,11 @@ def main() -> None:
             st.info("目前还没有风险分析结果。完成一次研究后，这里会展示风险贡献、历史回撤和压力测试。")
 
     with backtest_tab:
-        st.subheader("策略回测")
-        st.caption("回测用于检查一套规则在历史数据中的表现。历史结果不代表未来收益，也不等于真实交易成交结果。")
+        st.subheader("历史基准回测（仅供参考）")
+        st.caption(
+            "这一页展示完整历史区间上的基准回测，不是独立样本外验证。请优先参考账户概览中的滚动样本外结果；"
+            "历史收益不能代表未来，也不等于真实交易成交结果。"
+        )
         equity = read_csv(output_dir / "backtest_equity_curve.csv", date_index=True)
         if equity is not None and not equity.empty:
             st.markdown("### 策略与基准净值走势")
