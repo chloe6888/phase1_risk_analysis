@@ -64,7 +64,6 @@ def main() -> int:
         status_path, status,
         state="running",
         started_at=utc_now(),
-        pid=os.getpid(),
         current_step="1/5 初始化研究流程",
         message="后台研究流程正在执行；页面可以继续浏览上一次成功结果。",
     )
