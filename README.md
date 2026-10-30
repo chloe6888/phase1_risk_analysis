@@ -262,7 +262,7 @@ python memory_allocation.py \
 - 总存储主题（MU + SKHY + DRAM）占参考组合不超过 25%；
 - 默认平衡方案目标权重：MU 8%、SKHY 6%、DRAM 5%，合计 19%；
 - 同时输出 ETF 核心方案（仅 DRAM 15%）和直接持股方案（MU 8%、SKHY 8%，不持 DRAM），以便比较“ETF 分散”和“发行人集中”之间的取舍；
-- 自动增加 `cap_only_preserve_etf` 最小调整方案：固定 DRAM 当前股数，只按比例缩减 MU/SKHY 直接持仓，使三项合计尽量回到主题上限内。
+- 自动增加 `cap_only_preserve_etf` 最小调整方案：固定 DRAM 当前股数，在满足总主题与单发行人穿透敞口上限的前提下，选择保留市值最大的 MU/SKHY 整数股组合；若有同等解，再优先接近同比例减仓。
 - 若当前股数高于目标股数，标记 `REDUCE_TO_TARGET`；若低于目标股数，默认标记 `HOLD_NO_AUTO_ADD`，不会自动补仓。
 - 新增加仓许可门槛：主题至少低于上限 3 个百分点、单一发行人穿透敞口不超限，且 20/60 日趋势确认后，才标记 `STAGED_ADD_REVIEW_ONLY`；这仍是复核信号，不代表自动买入。
 
