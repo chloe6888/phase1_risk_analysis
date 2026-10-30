@@ -174,6 +174,45 @@ def fetch_yahoo_snapshot(ticker: str, ticker_factory: Callable[[str], Any] | Non
         except Exception as exc:
             errors.append(f"quarterly_cashflow: {type(exc).__name__}: {exc}")
 
+    financial_metrics: dict[str, float | None] = {
+        "revenue": _number(info.get("totalRevenue")),
+        "gross_profit": _number(info.get("grossProfits")),
+        "operating_income": _number(info.get("operatingIncome")),
+        "net_income": _number(info.get("netIncomeToCommon") or info.get("netIncome")),
+        "ebitda": _number(info.get("ebitda")),
+        "revenue_growth_yoy": _number(info.get("revenueGrowth")),
+        "gross_margin": _number(info.get("grossMargins")),
+        "operating_margin": _number(info.get("operatingMargins")),
+        "net_margin": _number(info.get("profitMargins")),
+        "return_on_equity": _number(info.get("returnOnEquity")),
+        "return_on_assets": _number(info.get("returnOnAssets")),
+        "trailing_pe": _number(info.get("trailingPE")),
+        "forward_pe": _number(info.get("forwardPE")),
+    }
+    metric_sources = {
+        key: "Yahoo Finance info" for key, value in financial_metrics.items() if value is not None
+    }
+    if any(value is None for key, value in financial_metrics.items() if key in {
+        "revenue", "gross_profit", "operating_income", "net_income", "ebitda"
+    }):
+        try:
+            income_stmt = instrument.income_stmt
+            statement_fields = {
+                "revenue": ("Total Revenue",),
+                "gross_profit": ("Gross Profit",),
+                "operating_income": ("Operating Income",),
+                "net_income": ("Net Income", "Net Income Common Stockholders"),
+                "ebitda": ("EBITDA",),
+            }
+            for field, labels in statement_fields.items():
+                if financial_metrics[field] is None:
+                    value, statement_period = _latest_value(income_stmt, labels)
+                    if value is not None:
+                        financial_metrics[field] = value
+                        metric_sources[field] = f"yfinance income_stmt {statement_period or ''}".strip()
+        except Exception as exc:
+            errors.append(f"income_stmt: {type(exc).__name__}: {exc}")
+
     if shares is None or cash is None or debt is None:
         try:
             balance_sheet = instrument.balance_sheet
@@ -227,6 +266,8 @@ def fetch_yahoo_snapshot(ticker: str, ticker_factory: Callable[[str], Any] | Non
         "cash": cash,
         "debt": debt,
         "market_cap": market_cap,
+        **financial_metrics,
+        "financial_metric_sources": metric_sources,
         "missing_fields": missing,
         "data_quality": data_quality,
         "fetch_warnings": errors,
