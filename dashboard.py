@@ -809,6 +809,13 @@ def main() -> None:
     with st.container(border=True):
         st.subheader("开始一次研究")
         st.caption("建议首次使用先导入券商持仓文件；若暂时没有文件，也可以手动填写股票代码和组合权重。")
+        research_mode = st.radio(
+            "研究设置模式",
+            options=["简易模式", "专业模式"],
+            horizontal=True,
+            help="简易模式只保留常用的组合输入、基准和检验起始日期；专业模式可修改回测与验证参数。",
+            key="research_settings_mode",
+        )
         with st.form("research_run_form"):
             upload_col, manual_col = st.columns([1.15, 1])
             with upload_col:
@@ -839,13 +846,6 @@ def main() -> None:
                 help="填写整个投资账户的净资产：股票、ETF、现金及其他资产，减去融资和负债。金额币种必须与持仓 CSV 一致；留空（0）则只能按导入的上市证券计算主题占比。",
             )
 
-            research_mode = st.radio(
-                "研究设置模式",
-                options=["简易模式", "专业模式"],
-                horizontal=True,
-                help="简易模式只保留常用的组合输入、基准和检验起始日期；专业模式可修改回测与验证参数。",
-                key="research_settings_mode",
-            )
             benchmark = st.text_input(
                 "对比基准",
                 value="SPY",
