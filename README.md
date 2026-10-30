@@ -270,6 +270,42 @@ DRAM 穿透权重默认使用 2026-10-29 公布的最新可查持仓：按 10 �
 
 **使用边界：** 目标权重、单发行人上限和主题上限是策略假设，不等于买卖信号。趋势指标只帮助识别短期转弱，不代表基本面价值判断。执行调仓前仍需核对真实持股数量、最新基金穿透持仓、公司估值、财报、税费、流动性与保证金要求。
 
+## 个股估值 v1（DCF + 远期 PE）
+
+当前估值模块支持 GOOG、NVDA、MU、SKHY 四个初始观察标的。它是单独的估值研究流程，不会替代组合风险分析，也不会连接券商。
+
+\`\`\`bash
+python run_valuation.py --tickers GOOG,NVDA,MU,SKHY
+\`\`\`
+
+强制刷新 Yahoo Finance 数据：
+
+\`\`\`bash
+python run_valuation.py --tickers GOOG,NVDA,MU,SKHY --refresh
+\`\`\`
+
+行情与财务快照缓存在 \`data/fundamentals/<TICKER>.json\`，默认最多复用 7 天。只有明确接受旧数据时才使用 \`--allow-stale-cache\`。缓存只保存公开证券数据，不包含个人持仓。
+
+主要输出：
+
+| 文件 | 内容 |
+|---|---|
+| \`outputs/valuation_summary.csv\` | 每个标的的 DCF/PE 三情景估值、买入观察线和卖出复核线 |
+| \`outputs/valuation_report.md\` | 可读研究报告、数据日期、字段来源和估值限制 |
+| \`outputs/valuation_fundamentals.json\` | 原始财务快照与数据源字段 |
+| \`outputs/valuation_assumptions_used.json\` | 本次实际使用的逐股估值假设 |
+| \`outputs/valuation_run_manifest.json\` | 运行时间、数据源和参数清单 |
+
+估值假设位于 \`config/valuation_assumptions.json\`。每个标的分别设置悲观/基准/乐观 FCF 增长率、股权资本成本、终值增长率及 PE 倍数；还可以配置安全边际、估值高估溢价和正常化 FCF。文件中的初始参数均为**人工设置的研究起点，不代表分析师一致预期、公司指引或模型识别出的最优参数**。修改后重新运行。
+
+**重要模型口径：** Yahoo Finance 的 CFO 减资本开支自由现金流并不是完整重建的 FCFE。当前 DCF 将其作为股权现金流代理，使用显式配置的股权资本成本折现，不再对结果加现金或减债务，以避免重复调整；它是指示性简化模型，不是完整机构级 DCF。远期 PE 使用数据源的 \`forwardEps\`；若缺失则回退到 \`trailingEps\`，并在报告中标记来源。
+
+MU、SKHY 属于周期性存储公司。单一年度自由现金流可能受到存储价格周期影响，系统会将它们标记为低置信度；应在 \`valuation_assumptions.json\` 中填入经跨周期研究的 \`normalized_fcf\`，并同步调整假设后，再把 DCF 用作估值参考。若数据字段不完整或非正数，对应模型会明确显示不可用，不会用虚构数字补齐。
+
+买入观察线 = 基准情景估值 × (1 - 安全边际)；卖出复核线 = 基准情景估值 × (1 + 高估溢价)。DCF 与 PE 两组线独立展示，不会自动合成为一个目标价。它们不是自动买入/卖出信号；执行前仍需检查最新财报、估值假设、技术趋势、仓位和组合风险。
+
+在 Streamlit 仪表盘中，“个股估值”页面可以选择标的，后台异步运行估值任务，并与组合研究结果分别保存。估值任务写入 \`outputs/runs/<task_id>/artifacts/\`，成功后更新 \`outputs/latest_valuation_success.json\`，不会覆盖组合研究的 \`latest_success.json\`。
+
 ## 本地仪表盘
 
 安装可选依赖后，在项目根目录运行：
