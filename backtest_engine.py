@@ -250,7 +250,7 @@ def run_backtest(
         raise ValueError("Each target-weight row must sum to at most 1.0; residual weight is treated as cash.")
 
     schedule = _rebalance_mask(prices.index, rebalance_freq)
-    scheduled_targets = weights.where(schedule, np.nan).ffill().fillna(0.0)
+    scheduled_targets = weights.where(pd.Series(schedule, index=prices.index), axis=0).ffill().fillna(0.0)
     asset_returns = prices.pct_change(fill_method=None)
     risk_free_daily = _daily_risk_free_returns(
         asset_returns.index, risk_free_rate_annual=risk_free_rate_annual,
