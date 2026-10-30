@@ -68,9 +68,6 @@ def output_status(output_dir: str | Path | None = None) -> dict[str, bool]:
         "memory_position_diagnostics.csv",
         "memory_allocation_scenarios.csv",
         "research_report.md",
-        "valuation_summary.csv",
-        "valuation_report.md",
-        "valuation_run_manifest.json",
     ]
     return {name: (directory / name).is_file() for name in names}
 
@@ -525,6 +522,22 @@ def main() -> None:
             except Exception as exc:
                 st.error(f"无法启动估值任务：{type(exc).__name__}: {exc}")
 
+        valuation_status_names = [
+            "valuation_summary.csv",
+            "valuation_report.md",
+            "valuation_fundamentals.json",
+            "valuation_assumptions_used.json",
+            "valuation_run_manifest.json",
+        ]
+        st.caption("估值结果文件状态")
+        st.dataframe(
+            pd.DataFrame([
+                {"文件": name, "状态": "已生成" if (valuation_output_dir / name).is_file() else "未生成"}
+                for name in valuation_status_names
+            ]),
+            hide_index=True,
+            use_container_width=True,
+        )
         valuation_summary = read_csv(valuation_output_dir / "valuation_summary.csv")
         if valuation_summary is not None and not valuation_summary.empty:
             st.markdown("#### 各股票估值对照")
