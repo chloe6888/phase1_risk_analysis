@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 from datetime import date
 from pathlib import Path
@@ -89,6 +90,7 @@ def make_pipeline_command(
     transaction_cost_bps: float = 5.0,
     slippage_bps: float = 5.0,
     risk_free_rate: float = 0.0,
+    portfolio_value: float | None = None,
     refresh: bool = False,
     allow_stale_cache: bool = False,
     skip_walk_forward: bool = False,
@@ -97,6 +99,10 @@ def make_pipeline_command(
     start = test_start.isoformat() if isinstance(test_start, date) else str(test_start)
     if bool(weights and weights.strip()) == bool(holdings_csv):
         raise ValueError("Provide exactly one of manual weights or imported holdings CSV.")
+    if portfolio_value is not None and (
+        not math.isfinite(float(portfolio_value)) or float(portfolio_value) <= 0
+    ):
+        raise ValueError("portfolio_value must be finite and positive when provided.")
     command = [sys.executable, str(PIPELINE_SCRIPT)]
     if holdings_csv:
         command += ["--holdings-csv", str(holdings_csv)]
@@ -117,6 +123,8 @@ def make_pipeline_command(
         "--slippage-bps", str(slippage_bps),
         "--risk-free-rate", str(risk_free_rate),
     ]
+    if portfolio_value is not None:
+        command += ["--portfolio-value", str(float(portfolio_value))]
     if refresh:
         command.append("--refresh")
     if allow_stale_cache:
@@ -627,6 +635,13 @@ def main() -> None:
                     help="格式为“股票代码=权重”，多个标的用英文逗号分隔；权重用小数表示，合计建议为 1。",
                 )
                 st.caption("例如：GOOG=0.60,SPY=0.40，表示组合中 GOOG 占 60%、SPY 占 40%。选择持仓文件后，此项会被忽略。")
+            account_net_equity = st.number_input(
+                "账户总净资产（可选，建议填写）",
+                min_value=0.0,
+                value=0.0,
+                step=1000.0,
+                help="填写整个投资账户的净资产：股票、ETF、现金及其他资产，减去融资和负债。金额币种必须与持仓 CSV 一致；留空（0）则只能按导入的上市证券计算主题占比。",
+            )
 
             with st.expander("高级研究设置（一般保持默认即可）", expanded=False):
                 setting_a, setting_b = st.columns(2)
@@ -680,6 +695,7 @@ def main() -> None:
                 transaction_cost_bps=float(cost_bps),
                 slippage_bps=float(slippage_bps),
                 risk_free_rate=float(risk_free_rate),
+                portfolio_value=(float(account_net_equity) if account_net_equity > 0 else None),
                 refresh=refresh,
                 allow_stale_cache=allow_stale,
                 skip_walk_forward=skip_walk_forward,
