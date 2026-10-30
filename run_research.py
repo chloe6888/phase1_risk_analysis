@@ -190,8 +190,24 @@ def render_report(
             lines.append(f"| {label} | {left} | {right} |")
         lines += [
             "", f"- Excess total return vs benchmark: {fmt_pct(backtest.get('excess_total_return'))}",
-            f"- Annualized turnover estimate: {fmt_num(backtest.get('annualized_turnover'), 2)}", "",
-            "The current backtest is a vectorized research approximation. It does not fully simulate share quantities, holdings-weight drift, actual fill prices, taxes, all market restrictions, or final liquidation costs.", "",
+            f"- Annualized turnover estimate (drift-aware): {fmt_num(backtest.get('annualized_turnover'), 2)}",
+            f"- Actual rebalance count: {backtest.get('actual_rebalance_count', 'N/A')}", "",
+        ]
+        comparison = backtest.get("legacy_comparison", {})
+        if comparison:
+            lines += [
+                "### Drift-aware vs legacy accounting", "",
+                "| Metric | Drift-aware v2 | Legacy target-weight model |",
+                "|---|---:|---:|",
+                f"| Total return | {fmt_pct(comparison.get('new_total_return'))} | {fmt_pct(comparison.get('legacy_total_return'))} |",
+                f"| Maximum drawdown | {fmt_pct(comparison.get('new_max_drawdown'))} | {fmt_pct(comparison.get('legacy_max_drawdown'))} |",
+                f"| New minus legacy total return | {fmt_pct(comparison.get('total_return_delta_new_minus_legacy'))} | — |",
+                "",
+                "The comparison uses the same signals and rebalance dates. It isolates the accounting change; it is not a comparison of separately optimized strategies.",
+                "",
+            ]
+        lines += [
+            "The drift-aware model still approximates fills and assumes costs reduce wealth pro rata. It does not model actual share quantities, market impact, taxes, trading halts/price limits, or end-of-period liquidation costs.", "",
         ]
     if validation:
         lines += [
