@@ -130,3 +130,20 @@ def test_report_view_translates_primary_headings() -> None:
 def test_task_step_and_value_labels_are_chinese_first() -> None:
     assert app._task_step_label("1/5 Data download, cache, and validation") == "第 1 步：行情下载与数据质量检查"
     assert app.VALUE_LABELS["REDUCE_TO_TARGET"] == "按目标仓位减仓复核"
+
+
+def test_memory_explanations_are_translated_to_chinese() -> None:
+    reason = app._localized_decision_reason(
+        "Current MU position exceeds this scenario's target weight (8.0%)."
+    )
+    assert reason == "当前 MU 持仓高于此方案目标仓位（8.0%）。"
+    summary = {
+        "memory_sleeve_weight_pct": 28.0,
+        "max_memory_weight_pct": 25.0,
+        "memory_value_above_limit": 300.0,
+        "overall_action": "REDUCE_MEMORY_SLEEVE",
+    }
+    assert "高于设定的 25.0% 上限" in app._memory_overall_reason(summary)
+    assert "现金、债券、其他账户及融资负债" in app._memory_denominator_note(
+        "Cash, bonds, other accounts and financing are not included."
+    )
