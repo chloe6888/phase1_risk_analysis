@@ -366,6 +366,7 @@ def _task_step_label(step: str) -> str:
         "3/5 Baseline backtest": "第 3 步：基准策略回测",
         "4/5 Parameter sensitivity and single split": "第 4 步：参数敏感性与样本外检验",
         "5/5 Rolling walk-forward validation": "第 5 步：滚动样本外验证",
+        "Fetch data and value": "正在获取行情与财务数据并计算估值",
         "等待后台进程启动": "任务已提交，正在启动后台进程",
         "1/5 初始化研究流程": "正在初始化研究流程",
         "研究完成": "研究已完成",
@@ -404,10 +405,15 @@ def render_task_monitor() -> None:
                 st.write(f"**当前进度：** {step}")
                 raw_step = str(task.get("current_step") or "")
                 try:
-                    current = int(raw_step.split("/", 1)[0])
-                    st.progress(min(max(current / 5, 0.0), 1.0), text=f"研究流程进度：第 {current} / 5 步")
+                    current_part, total_part = raw_step.split("/", 1)
+                    current = int(current_part)
+                    total = int(total_part.split()[0])
+                    st.progress(
+                        min(max(current / max(total, 1), 0.0), 1.0),
+                        text=f"{task_label}进度：第 {current} / {total} 步",
+                    )
                 except (ValueError, ZeroDivisionError):
-                    st.progress(0.05, text="后台进程启动中")
+                    st.progress(0.05, text=f"{task_label}后台进程启动中")
             elif state == "succeeded":
                 st.success(f"最近一次{task_label}已成功完成，新的完整结果已经发布。")
                 st.caption(f"完成时间（UTC）：{task.get('finished_at', '暂无记录')}")
