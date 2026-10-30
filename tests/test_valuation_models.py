@@ -276,3 +276,51 @@ def test_currency_mismatch_blocks_dcf_and_pe_values() -> None:
     assert result["pe_base"] is None
     assert result["overall_confidence"] == "low"
     assert "未进行货币换算" in result["limitations"]
+
+
+def test_reported_currency_mismatch_blocks_dcf_but_keeps_quote_currency_pe() -> None:
+    fundamentals = {
+        "current_price": 160,
+        "currency": "USD",
+        "financial_currency": "KRW",
+        "eps_currency": "USD",
+        "dcf_currency_mismatch": True,
+        "pe_currency_mismatch": False,
+        "forward_eps": 15.0,
+        "free_cash_flow": 100,
+        "diluted_shares": 10,
+        "cash": 100,
+        "debt": 0,
+    }
+    result = value_ticker("SKHY", fundamentals, BASE_ASSUMPTIONS)
+    assert result["dcf_base"] is None
+    assert result["pe_base"] == 300.0
+    assert result["overall_confidence"] == "low"
+    assert "DCF 已暂停" in result["limitations"]
+
+
+def test_yahoo_adapter_preserves_quote_and_financial_currencies() -> None:
+    class FakeTicker:
+        info = {
+            "shortName": "SK hynix ADR",
+            "currency": "USD",
+            "financialCurrency": "KRW",
+            "sharesOutstanding": 1000,
+            "totalCash": 200,
+            "totalDebt": 50,
+            "forwardEps": 15.0,
+            "freeCashflow": 500,
+        }
+
+        def history(self, period: str, auto_adjust: bool) -> pd.DataFrame:
+            return pd.DataFrame(
+                {"Close": [160.0]},
+                index=pd.to_datetime(["2026-10-29"]),
+            )
+
+    result = fetch_yahoo_snapshot("SKHY", ticker_factory=lambda _symbol: FakeTicker())
+    assert result["currency"] == "USD"
+    assert result["financial_currency"] == "KRW"
+    assert result["dcf_currency_mismatch"] is True
+    assert result["eps_currency"] == "USD"
+    assert result["pe_currency_mismatch"] is False
