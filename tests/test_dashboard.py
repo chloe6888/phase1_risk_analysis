@@ -105,6 +105,21 @@ def test_make_pipeline_command_rejects_both_or_neither_portfolio_inputs() -> Non
         app.make_pipeline_command(weights="SPY=1", holdings_csv="data/private/holdings.csv", test_start="2023-01-01")
 
 
+def test_simple_mode_defaults_are_explicit_and_common_risk_groups_are_localized() -> None:
+    assert app.SIMPLE_MODE_DEFAULTS == {
+        "lookbacks": "63,126,252",
+        "skip_recents": "5,21",
+        "top_ns": "1,2,3",
+        "train_window": 252,
+        "test_window": 63,
+        "transaction_cost_bps": 5.0,
+        "slippage_bps": 5.0,
+        "risk_free_rate": 0.0,
+    }
+    assert app._risk_group_label("semiconductor_related") == "半导体相关"
+    assert app._risk_group_label("custom_theme_name") == "custom theme name"
+
+
 def test_dashboard_formats_missing_metrics_in_chinese() -> None:
     assert app._pct(None) == "暂无数据"
     assert app._number(None) == "暂无数据"
