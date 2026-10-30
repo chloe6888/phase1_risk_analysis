@@ -35,7 +35,7 @@ DEFAULT_SCENARIOS: dict[str, dict[str, float]] = {
 # Indicative look-through exposure using the 2026-10-29 daily holdings file:
 # Micron direct + swap lines = 27.87%; SK hynix direct + swap lines = 21.14%.
 # These are configuration assumptions, not fixed weights; refresh before trading.
-DEFAULT_DRAM_LOOKTHROUGH = {"MU": 0.2787, "SKHY": 0.2114}
+DEFAULT_DRAM_LOOKTHROUGH = {"MU": 0.2787, "SKHY": 0.2182}
 DEFAULT_LOOKTHROUGH_ASOF = "2026-10-29"
 DEFAULT_ADD_BUFFER_PCT = 3.0
 DEFAULT_MEMORY_LIMIT_PCT = 25.0
