@@ -116,6 +116,7 @@ def validate_assumptions(config: Mapping[str, Any]) -> dict[str, Any]:
         "forecast_years": years_raw,
         "cyclical": bool(config.get("cyclical", False)),
         "normalized_fcf": finite_number(config.get("normalized_fcf")),
+        "normalized_fcf_currency": str(config.get("normalized_fcf_currency", "")).upper() or None,
         "notes": str(config.get("notes", "")),
         "assumption_source": str(config.get("assumption_source", "user-configured starter assumptions")),
         "scenarios": {},
@@ -167,6 +168,13 @@ def value_ticker(
     normalized_fcf = cfg["normalized_fcf"]
     valuation_fcf = normalized_fcf if normalized_fcf is not None else reported_fcf
     fcf_basis = "user_normalized_fcf" if normalized_fcf is not None else "reported_vendor_fcf"
+    valuation_fcf_currency = (
+        cfg["normalized_fcf_currency"]
+        if normalized_fcf is not None and cfg["normalized_fcf_currency"]
+        else fundamentals.get("financial_currency", fundamentals.get("currency", "USD"))
+    )
+    if normalized_fcf is not None:
+        dcf_currency_mismatch = str(valuation_fcf_currency).upper() != str(fundamentals.get("currency", "USD")).upper()
 
     row: dict[str, Any] = {
         "ticker": symbol,
@@ -188,6 +196,7 @@ def value_ticker(
         "eps_source": fundamentals.get("eps_source"),
         "free_cash_flow": reported_fcf,
         "valuation_fcf": valuation_fcf,
+        "valuation_fcf_currency": valuation_fcf_currency,
         "fcf_basis": fcf_basis if valuation_fcf is not None else "unavailable",
         "fcf_source": fundamentals.get("fcf_source"),
         "diluted_shares": shares,
