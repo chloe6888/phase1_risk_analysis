@@ -452,7 +452,7 @@ def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_h
         raise ValueError("At least one valid ticker must be supplied.")
     if benchmark not in active_tickers:
         raise ValueError(
-            f"Benchmark {BENCHMARK!r} must be included in TICKERS. "
+            f"Benchmark {benchmark!r} must be included in TICKERS. "
             "Update the configuration at the top of this file."
         )
     if len(set(active_tickers)) != len(active_tickers):
