@@ -313,3 +313,41 @@ def test_invalid_cache_triggers_download(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(app, "download_one_ticker", lambda *args, **kwargs: downloaded)
     result = app.get_ticker_data("TEST", "2024-01-01", "2024-03-01")
     pd.testing.assert_frame_equal(result, downloaded)
+
+
+def test_short_history_cache_is_accepted_when_metadata_matches(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import json
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(app, "RAW_DIR", tmp_path)
+    dates = pd.bdate_range("2026-07-13", "2026-10-30")
+    data = pd.DataFrame({"Adj Close": np.linspace(100.0, 120.0, len(dates))}, index=dates)
+    app.cache_metadata_path("SKHY").write_text(json.dumps({
+        "ticker": "SKHY",
+        "downloaded_at_utc": "2026-10-30T23:00:00+00:00",
+        "requested_start": "2015-01-01",
+        "requested_end": "2026-11-02",
+        "first_data_date": dates[0].date().isoformat(),
+        "last_data_date": dates[-1].date().isoformat(),
+        "row_count": len(data),
+    }), encoding="utf-8")
+    now = datetime(2026, 10, 31, 12, tzinfo=timezone.utc)
+
+    usable, reason = app.cache_is_usable(
+        "SKHY", data, "2015-01-01", "2026-11-02", now=now,
+        allow_short_history=True,
+    )
+    assert usable is True
+    assert "fresh cache" in reason
+
+    rejected, reason = app.cache_is_usable(
+        "SKHY", data, "2015-01-01", "2026-11-02", now=now,
+        allow_short_history=False,
+    )
+    assert rejected is False
+    assert "requested start date" in reason
+
+
+def test_short_history_ticker_must_be_in_active_universe(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(ValueError, match="included in the active universe"):
+        app.main(tickers=["SPY", "AAA"], short_history_tickers=["SKHY"])
