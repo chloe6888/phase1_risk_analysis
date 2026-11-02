@@ -45,6 +45,7 @@
     ├── factor_risk.py
     ├── paper_trading.py
     ├── risk_monitor.py
+    ├── monitoring_runner.py
     ├── walk_forward_validation.py
     ├── run_research.py
     ├── dashboard.py
@@ -65,6 +66,7 @@
     │   ├── test_factor_risk.py
     │   ├── test_paper_trading.py
     │   ├── test_risk_monitor.py
+    │   ├── test_monitoring_runner.py
     │   ├── test_walk_forward_validation.py
     │   ├── test_run_research.py
     │   ├── test_dashboard.py
@@ -412,6 +414,53 @@ python risk_monitor.py \
 持仓 CSV 可增加 `risk_group` 列；也可以通过 `--groups-json` 与 `--group-caps-json` 覆盖分组和上限。输出包括 `risk_monitor_positions.csv`、`risk_monitor_alerts.csv`、`risk_monitor_daily_path.csv`、`risk_monitor_snapshot.json` 和 `risk_monitor_report.md`。
 
 **历史口径限制：** 历史风险路径将当前股数应用于过去的调整收盘价，并假设现金余额不变；它不是按历史交易、入金、出金及公司行动重建的真实账户净值。因此历史波动率、回撤和 VaR/CVaR 是风险代理估计，而不是实际账户历史业绩或损失上限。阈值是用户配置的风险预算规则，监控只产生告警，不自动交易。
+
+## 定时风险监控与每日/每周报告
+
+新增 `monitoring_runner.py`，在现有只读风险监控基础上保存每次执行的时间戳快照，并比较前后两次结果，识别告警的首次触发、持续存在和解除。它不在 Python 进程里常驻运行，适合由 macOS/Linux cron、Windows 任务计划程序或服务器 systemd timer 定期调用。
+
+每日执行一次：
+
+```bash
+python monitoring_runner.py \
+  --holdings-csv data/private/holdings_snapshot.csv \
+  --prices data/raw/close_price_panel.csv \
+  --adjusted-prices data/raw/adjusted_close_panel.csv \
+  --cash 5000 \
+  --mode daily
+```
+
+每周生成近 7 日汇总：
+
+```bash
+python monitoring_runner.py \
+  --holdings-csv data/private/holdings_snapshot.csv \
+  --prices data/raw/close_price_panel.csv \
+  --adjusted-prices data/raw/adjusted_close_panel.csv \
+  --cash 5000 \
+  --mode weekly \
+  --history-days 7
+```
+
+Linux/macOS 可在 crontab 中配置（示例为每个工作日美东收盘后约 30 分钟；服务器时区需自行核实）：
+
+```cron
+30 16 * * 1-5 cd /path/to/phase1_risk_analysis && .venv/bin/python monitoring_runner.py --mode daily --holdings-csv data/private/holdings_snapshot.csv --cash 5000
+0 17 * * 5 cd /path/to/phase1_risk_analysis && .venv/bin/python monitoring_runner.py --mode weekly --holdings-csv data/private/holdings_snapshot.csv --cash 5000
+```
+
+Windows 可在任务计划程序中设置工作目录为项目根目录、程序为虚拟环境的 `python.exe`、参数为 `monitoring_runner.py --mode daily --holdings-csv data/private/holdings_snapshot.csv --cash 5000`；每周另建一个任务，将模式改为 `weekly`。请按实际行情更新时间和服务器时区调整触发时间，避免在日线数据尚未更新时误判为数据过期。
+
+运行产物位于 `outputs/monitoring/`：
+- `snapshots/`：每次运行独立的不可覆盖 JSON 快照；
+- `latest_snapshot.json`：最近一次的完整风险、持仓和告警快照；
+- `monitoring_state.json`：上次活跃告警状态，用于识别触发、持续和解除；
+- `latest_alert_events.json`：本次告警事件，可供后续通知渠道读取；
+- `alert_event_history.jsonl`：跨运行追加保存的告警事件历史，包含快照 ID，可供通知消费者去重和补偿处理；
+- `monitoring_daily_report.md`：每日风险快照报告；
+- `monitoring_weekly_summary.json` 与 `monitoring_weekly_report.md`：最近指定日数内已有快照的统计。
+
+**重要边界：** 监控程序只生成本地快照和告警事件文件，不会自动发送邮件、聊天消息或下单。若机器关机、行情未更新或计划任务失败，该时间段不会有监控快照；周报会显示实际保存的快照数量和覆盖时间，而不会伪造连续监控。当前历史风险路径仍以当前股数回放历史调整价格，是风险代理，不是历史真实账户净值。
 
 ## 一键运行完整研究流程
 
