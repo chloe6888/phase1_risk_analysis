@@ -758,11 +758,8 @@ python phase1_risk_analysis.py --tickers SPY,SOXX,NVDA,GOOGL,MU,SKHY,DRAM
 
 `etf_lookthrough.py` 接受带明确 as-of 日期的 ETF 完整持仓 CSV，合并直接股票、TRS/掉期和 ADR 对发行人的敞口。DRAM 的持仓会随时间变化，因此应从 [Roundhill 官方 DRAM 页面](https://www.roundhillinvestments.com/etf/dram/)取得对应日期的完整持仓，再导入：
 
-\`\`\`bash
-python etf_lookthrough.py \\
-  --holdings-csv data/private/DRAM_holdings.csv \\
-  --as-of YYYY-MM-DD \\
-  --source-name "Roundhill official holdings"
-\`\`\`
+```bash
+python etf_lookthrough.py --holdings-csv data/private/DRAM_holdings.csv --as-of YYYY-MM-DD --source-name "Roundhill official holdings"
+```
 
 导入后先检查未映射权重、现金权重和完整度，再用于组合穿透；不要将 ETF 里的 MU/SKHY 敞口与直接持仓简单重复相加。
