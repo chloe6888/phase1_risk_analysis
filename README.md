@@ -758,7 +758,7 @@ python run_personal_portfolio_suite.py --refresh \
   --holdings-csv data/private/holdings_snapshot.csv
 ~~~
 
-如确认行情缓存足够新且覆盖完整，可改用 --use-cache。只有实际核实了账户现金余额，才传入 --cash 1234.56；省略现金参数时，当前持仓权重只按导入证券计算，结果会明确标注现金未提供，不会将未知现金写成已确认的 0。需要 ETF 发行人穿透时，按日期准备 DRAM 与 QQQ 的官方完整持仓快照后，分别重复传入 --lookthrough-snapshot。
+如确认行情缓存足够新且覆盖完整，可改用 --use-cache。只有实际核实了账户现金余额，才传入 --cash 1234.56；省略现金参数时，当前持仓权重只按导入证券计算，结果会明确标注现金未提供，不会将未知现金写成已确认的 0。ETF 穿透快照默认从 outputs/etf_holdings/ 自动发现：每只已持有基金选取分析日当天或之前最新的有效快照。若要覆盖自动发现，可传入 --lookthrough-snapshot；若快照放在其他目录，使用 --etf-snapshot-dir 指定。
 
 数据验收若为 BLOCKED，统一入口会停止，不会继续给出风险和配置结果；WARNING 会继续生成报告，但保留短历史、价格异常、ETF 穿透缺失或样本外证据不足等提示。主要结果位于：
 - outputs/personal_suite/personal_portfolio_suite.md：本次运行总览和阶段状态；
@@ -821,15 +821,15 @@ ETF 底层敞口必须使用与披露日期对应的 holdings CSV；禁止将某
 - [Roundhill DRAM ETF 官方页面](https://www.roundhillinvestments.com/etf/dram/)
 - [Invesco QQQ Trust 官方页面及 Holdings Export](https://www.invesco.com/us/en/financial-products/etfs/invesco-qqq-trust-series-1.html)
 
-将官方持仓文件分别放入本地 data/private/，然后使用文件披露日期导入。DRAM 默认识别 MU 和 SK hynix；QQQ 使用项目内的 config/qqq_issuer_patterns.json，只映射本组合关心的发行人：
+将官方持仓文件分别放入本地 data/private/，然后使用文件披露日期导入。项目内置 issuer map 默认识别本组合七家经营性公司：AVGO、GOOG（GOOG/GOOGL 合并为 Alphabet）、LRCX、MRVL、MU、OKTA 和 SKHY。DRAM 通常主要映射 MU 与 SK hynix；QQQ 可映射上述七家持仓公司。没有匹配到的其他基金成分会留在 unmapped weight，不能把它们当作已完成穿透。若发行方导出使用了不同名称或代码，可继续通过 --issuer-map-json 指定自定义映射：
 
 ```bash
-python etf_lookthrough.py --fund-ticker DRAM --holdings-csv data/private/DRAM_holdings.csv --as-of YYYY-MM-DD --source-name "Roundhill official holdings"
+python etf_lookthrough.py --fund-ticker DRAM --holdings-csv data/private/DRAM_holdings.csv --as-of YYYY-MM-DD --source-name "Roundhill official holdings" --output-dir outputs/etf_holdings
 
-python etf_lookthrough.py --fund-ticker QQQ --holdings-csv data/private/QQQ_holdings.csv --as-of YYYY-MM-DD --source-name "Invesco QQQ official holdings" --issuer-map-json config/qqq_issuer_patterns.json
+python etf_lookthrough.py --fund-ticker QQQ --holdings-csv data/private/QQQ_holdings.csv --as-of YYYY-MM-DD --source-name "Invesco QQQ official holdings" --output-dir outputs/etf_holdings
 ```
 
-然后把两份生成的 JSON 快照传给风险报告：
+导入器会在 outputs/etf_holdings/ 生成不可变的带日期 JSON 快照。运行 python run_personal_portfolio_suite.py --refresh 时会自动选择每只已持有 ETF 的最新合格快照，无需再手动复制路径。相同基金和相同披露日期若存在多个候选文件，会要求先人工处理重复文件，避免无声地选错来源。单独运行风险报告时，仍可显式传入快照：
 
 ```bash
 python run_personal_risk_analysis.py \
