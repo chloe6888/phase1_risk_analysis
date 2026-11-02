@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "single_name_max_weight": 0.15,
+  "group_max_weights": {
+    "semiconductor_related": 0.45,
+    "internet_platform": 0.4,
+    "enterprise_security": 0.2,
+    "broad_tech_etf": 0.25
+  },
+  "subgroup_max_weights": {
+    "memory": 0.25,
+    "semiconductor_equipment": 0.25,
+    "networking_custom_silicon": 0.2,
+    "search_cloud_ai": 0.35,
+    "identity_security_software": 0.2,
+    "nasdaq_100": 0.25
+  },
+  "max_price_age_calendar_days": 5,
+  "max_quote_age_days": 7,
+  "max_financial_age_days": 180,
+  "min_valid_valuation_methods_for_add": 2,
+  "acceptable_confidence_for_add": [
+    "medium",
+    "high"
+  ],
+  "require_dcf_and_pe_buy_thresholds": true,
+  "require_confirmed_cash_for_add": true,
+  "require_quote_price_match": true,
+  "quote_price_max_deviation_pct": 3,
+  "notes": [
+    "This policy generates research review statuses only; it does not place orders.",
+    "Any single-name, parent-group or subgroup cap breach triggers a reduce/rebalance review, not an automatic sell.",
+    "An add research-watch status requires both DCF and forward-PE gates to pass, medium/high valuation confidence, validated data and verified available cash.",
+    "If cash is not supplied, no add status can be generated; this is not a claim that the account has zero cash.",
+    "ETF positions are not valued with company DCF/PE; they are reviewed through dated issuer look-through and the same portfolio concentration limits.",
+    "Price, data freshness, and valuation assumptions must be checked again before any manual order."
+  ]
+}
