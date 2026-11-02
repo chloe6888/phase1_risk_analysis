@@ -74,6 +74,21 @@ def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
     os.replace(temporary, path)
 
 
+def _pid_is_alive(pid: int) -> bool:
+    """Return True when the lock owner's process exists or access is restricted."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def _acquire_lock(output_dir: Path, *, stale_after_seconds: int = 3600) -> tuple[int, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     lock_path = output_dir / ".monitoring.lock"
@@ -83,23 +98,56 @@ def _acquire_lock(output_dir: Path, *, stale_after_seconds: int = 3600) -> tuple
         return fd, lock_path
     except FileExistsError as exc:
         try:
-            age = time.time() - lock_path.stat().st_mtime
+            initial_stat = lock_path.stat()
+            age = time.time() - initial_stat.st_mtime
         except OSError:
             age = 0.0
-        if age > stale_after_seconds:
+            initial_stat = None
+        if age > stale_after_seconds and initial_stat is not None:
             try:
-                lock_path.unlink()
-            except OSError:
-                pass
-            try:
-                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-                os.write(fd, str(os.getpid()).encode("ascii"))
-                return fd, lock_path
-            except FileExistsError:
-                pass
+                owner_pid = int(lock_path.read_text(encoding="ascii").strip())
+            except (OSError, ValueError):
+                owner_pid = -1
+            # A long-running but live monitor must keep its lock. Only reclaim
+            # a stale lock whose owner PID is demonstrably gone.
+            if not _pid_is_alive(owner_pid):
+                try:
+                    current_stat = lock_path.stat()
+                    same_file = (
+                        current_stat.st_ino == initial_stat.st_ino
+                        and current_stat.st_mtime_ns == initial_stat.st_mtime_ns
+                    )
+                    if same_file:
+                        lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                try:
+                    fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                    os.write(fd, str(os.getpid()).encode("ascii"))
+                    return fd, lock_path
+                except FileExistsError:
+                    pass
         raise RuntimeError(
             "另一个风险监控任务正在运行；请勿重复启动。若确认进程已退出，可检查并清理过期 .monitoring.lock。"
         ) from exc
+
+
+def _append_event_history(
+    path: Path,
+    *,
+    snapshot_id: str,
+    events: list[dict[str, Any]],
+) -> None:
+    """Append immutable alert events for later notification/reconciliation."""
+    if not events:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        for event in events:
+            record = {"snapshot_id": snapshot_id, **event}
+            handle.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\\n")
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def _alert_key(alert: Mapping[str, Any]) -> str:
@@ -362,6 +410,12 @@ def run_monitoring(
             "events": events,
             "active_alerts": active_alerts,
         })
+        event_history_path = target_dir / "alert_event_history.jsonl"
+        _append_event_history(
+            event_history_path,
+            snapshot_id=snapshot_id,
+            events=events,
+        )
         _atomic_write_json(state_path, {
             "version": 1,
             "updated_at": created_at,
@@ -405,6 +459,7 @@ def run_monitoring(
             "snapshot_id": snapshot_id,
             "created_at": created_at,
             "snapshot_path": str(snapshot_path),
+            "event_history_path": str(target_dir / "alert_event_history.jsonl"),
             "active_alert_count": len(active_alerts),
             "triggered_alert_count": sum(event["event_type"] == "TRIGGERED" for event in events),
             "persisting_alert_count": sum(event["event_type"] == "PERSISTING" for event in events),

@@ -456,6 +456,7 @@ Windows 可在任务计划程序中设置工作目录为项目根目录、程序
 - `latest_snapshot.json`：最近一次的完整风险、持仓和告警快照；
 - `monitoring_state.json`：上次活跃告警状态，用于识别触发、持续和解除；
 - `latest_alert_events.json`：本次告警事件，可供后续通知渠道读取；
+- `alert_event_history.jsonl`：跨运行追加保存的告警事件历史，包含快照 ID，可供通知消费者去重和补偿处理；
 - `monitoring_daily_report.md`：每日风险快照报告；
 - `monitoring_weekly_summary.json` 与 `monitoring_weekly_report.md`：最近指定日数内已有快照的统计。
 
