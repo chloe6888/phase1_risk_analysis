@@ -704,3 +704,32 @@ python -m pytest -q
 ---
 
 本项目仅用于编程学习与量化研究，不构成投资、税务或法律建议。历史表现不代表未来结果。
+
+## 真实账户数据验收（本机执行）
+
+在用个人持仓数据解释风险和调整仓位前，先运行本地验收器。它只读取本机文件，不联网、不上传 CSV，也不会连接券商或下单。
+
+~~~bash
+python real_data_acceptance.py \
+  --holdings-csv data/private/holdings_snapshot.csv \
+  --close-prices data/raw/close_price_panel.csv \
+  --adjusted-prices data/raw/adjusted_close_panel.csv
+~~~
+
+默认读取 data/private/holdings_snapshot.csv、data/raw/close_price_panel.csv 和 data/raw/adjusted_close_panel.csv，并将脱敏结果写入 outputs/acceptance/real_data_acceptance.md 与 real_data_acceptance.json。报告不包含股数、成本价、市值或账户余额。若行情文件尚未覆盖所有持仓标的，可先按实际代码补齐行情：
+
+~~~bash
+python phase1_risk_analysis.py --tickers SPY,SOXX,NVDA,GOOGL,MU,SKHY,DRAM
+~~~
+
+请将示例代码替换为持仓 CSV 中的真实代码；数据下载成功后再运行验收器。也可以使用 --as-of-date YYYY-MM-DD 重现某个历史验收日期，或用 --max-staleness-days 和 --minimum-common-observations 调整数据门槛。
+
+**验收判定：**
+- PASS：基础字段、价格覆盖、价格日期、共同历史和（如提供）券商汇总核对均通过。
+- WARNING：可继续检查，但存在短历史、单日异常跳变、集中度提醒或未提供券商汇总值等情况。
+- BLOCKED：持仓字段/行情缺失、价格过期、共同历史不足、券商汇总差异超限，或币种口径未确认。阻断时不要继续把结果解释为完整账户风险。
+
+**币种限制：** 当前组合导入器只支持单一计价币种。持仓 CSV 必须包含 currency 列并为每笔持仓明确填写报价币种，例如美股为 USD、港股为 HKD；缺失/空白币种会阻断验收，已识别的非美元交易所后缀还会校验币种是否匹配。若同一账户同时有 USD 与 HKD 等持仓，本阶段会阻断组合级合并分析。下一步必须先实现有日期依据、可追溯的 FX 转换与基准币种核算，不能把两种货币的名义价格直接相加。
+
+如需与券商汇总值对账，可在 holdings_snapshot.csv.meta.json 中本地保存 reported_market_value、reported_unrealized_pnl 和可选 reconciliation_tolerance。该文件同样属于私人数据，勿提交到 Git。只有提供了券商汇总值，验收器才会进行对应对账；没有汇总值会显示警告，而不会误报为已完成对账。
+
