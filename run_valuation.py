@@ -27,6 +27,16 @@ def load_config(path: str | Path) -> dict[str, Any]:
         payload = json.load(handle)
     if not isinstance(payload, dict) or not isinstance(payload.get("tickers"), dict):
         raise ValueError("Valuation config must contain a ticker mapping.")
+    defaults = payload.get("default_tickers", sorted(payload["tickers"]))
+    if not isinstance(defaults, list) or not defaults:
+        raise ValueError("default_tickers must be a non-empty list when supplied.")
+    normalized = [str(item).strip().upper() for item in defaults]
+    if any(not item for item in normalized) or len(set(normalized)) != len(normalized):
+        raise ValueError("default_tickers must contain unique, non-empty symbols.")
+    missing = sorted(set(normalized) - set(payload["tickers"]))
+    if missing:
+        raise ValueError(f"default_tickers references unconfigured symbols: {missing}")
+    payload["default_tickers"] = normalized
     return payload
 
 
@@ -330,9 +340,9 @@ def run(
 
 def main() -> None:
     config = load_config(DEFAULT_CONFIG)
-    available = sorted(config["tickers"].keys())
+    available = config["default_tickers"]
     parser = argparse.ArgumentParser(description="Run DCF and forward-PE scenarios; no trade orders are placed.")
-    parser.add_argument("--tickers", default=",".join(available), help="Comma-separated configured symbols.")
+    parser.add_argument("--tickers", default=",".join(available), help="Comma-separated configured symbols; defaults to held operating companies.")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
