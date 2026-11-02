@@ -200,11 +200,20 @@ def main() -> None:
     parser.add_argument("--adjusted-prices", type=Path, default=DEFAULT_ADJUSTED)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_REPORTS)
     parser.add_argument("--as-of-date", help="Override acceptance date (YYYY-MM-DD); normally leave unset.")
-    parser.add_argument(
-        "--use-cache",
+    refresh_mode = parser.add_mutually_exclusive_group()
+    refresh_mode.add_argument(
+        "--refresh",
+        dest="refresh",
         action="store_true",
-        help="Use cache only when fresh and complete; otherwise the downloader refreshes it.",
+        help="Force a fresh market-data download (the default).",
     )
+    refresh_mode.add_argument(
+        "--use-cache",
+        dest="refresh",
+        action="store_false",
+        help="Reuse cache only when fresh and complete; stale or incomplete data is refreshed.",
+    )
+    parser.set_defaults(refresh=True)
     args = parser.parse_args()
     try:
         result = run_pipeline(
@@ -213,7 +222,7 @@ def main() -> None:
             close_prices_path=args.close_prices,
             adjusted_prices_path=args.adjusted_prices,
             output_dir=args.output_dir,
-            refresh=not args.use_cache,
+            refresh=args.refresh,
             as_of_date=args.as_of_date,
         )
     except (ValueError, OSError) as exc:
