@@ -146,3 +146,25 @@ def test_run_pipeline_refreshes_reference_and_held_tickers_then_accepts(tmp_path
     assert acceptance_args[0] == holdings_path
     assert acceptance_kwargs["minimum_common_observations"] == 60
     assert acceptance_kwargs["as_of_date"] == "2026-02-10"
+
+@pytest.mark.parametrize(
+    ("arguments", "expected_refresh"),
+    [(["--refresh"], True), (["--use-cache"], False), ([], True)],
+)
+def test_cli_refresh_modes_are_supported(
+    arguments: list[str],
+    expected_refresh: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    calls: dict[str, object] = {}
+    monkeypatch.setattr(sys, "argv", ["run_personal_portfolio.py", *arguments])
+
+    def fake_pipeline(**kwargs: object) -> dict[str, str]:
+        calls.update(kwargs)
+        return {"status": "PASS"}
+
+    monkeypatch.setattr(app, "run_pipeline", fake_pipeline)
+    app.main()
+    assert calls["refresh"] is expected_refresh
