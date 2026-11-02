@@ -374,3 +374,39 @@ def test_make_pipeline_command_rejects_nonpositive_or_nonfinite_portfolio_equity
                 test_start="2023-01-01",
                 portfolio_value=invalid,
             )
+
+
+
+def test_private_upload_persists_atomically_and_rejects_path_names(tmp_path: Path) -> None:
+    class FakeUpload:
+        def getvalue(self) -> bytes:
+            return b"ticker,weight\nAAA,0.5\n"
+
+    path = app.persist_private_upload(
+        FakeUpload(), "weights.csv", private_root=tmp_path
+    )
+    assert path == tmp_path / "weights.csv"
+    assert path.read_bytes() == b"ticker,weight\nAAA,0.5\n"
+    assert app.persist_private_upload(None, "ignored.csv", private_root=tmp_path) is None
+    import pytest
+    with pytest.raises(ValueError, match="simple file name"):
+        app.persist_private_upload(FakeUpload(), "../outside.csv", private_root=tmp_path)
+
+
+def test_local_tool_runner_uses_allow_list_and_json_object_parser() -> None:
+    import pytest
+    with pytest.raises(ValueError, match="Unsupported local tool"):
+        app.run_local_tool("arbitrary.py", ["--help"])
+    assert app.parse_json_object_text('{"memory":0.25}', "主题上限") == {"memory": 0.25}
+    with pytest.raises(ValueError, match="有效 JSON"):
+        app.parse_json_object_text("{bad", "主题上限")
+    with pytest.raises(ValueError, match="必须是 JSON 对象"):
+        app.parse_json_object_text("[1,2]", "主题上限")
+
+
+def test_streamlit_dashboard_renders_research_toolbox_without_outputs() -> None:
+    from streamlit.testing.v1 import AppTest
+
+    page = AppTest.from_file(str(app.ROOT / "dashboard.py"), default_timeout=30).run()
+    assert not page.exception
+    assert any("研究工具箱" in element.value for element in page.subheader)
