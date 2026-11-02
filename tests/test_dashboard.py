@@ -437,12 +437,9 @@ def test_personal_risk_allocation_and_decision_tools_are_allowlisted() -> None:
         "position_decision_rules.py",
     }
     assert expected.issubset(app.LOCAL_TOOL_SCRIPTS)
-    import pytest
     for script in expected:
-        with pytest.raises((FileNotFoundError, OSError, ValueError)):
-            # The script is allow-listed, but command execution is intentionally
-            # not started by this unit test.
-            app.run_local_tool(script, ["--help"], timeout_seconds=1) if script == "not-allowlisted.py" else None
+        ok, output = app.run_local_tool(script, ["--help"], timeout_seconds=15)
+        assert ok, f"{script} help failed: {output}"
 
 
 def test_dashboard_exposes_personal_risk_allocation_and_cash_confirmation_controls() -> None:
