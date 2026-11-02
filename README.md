@@ -748,6 +748,27 @@ python phase1_risk_analysis.py --tickers SPY,SOXX,NVDA,GOOGL,MU,SKHY,DRAM
 3. 在 Codespaces 终端执行：`python run_personal_portfolio.py --refresh`。
 4. 阅读 `outputs/acceptance/real_data_acceptance.md`。`BLOCKED` 表示不能进入正式风险分析；`WARNING` 表示数据可读但有需披露的限制。行情缓存位于 `data/raw/`，个人持仓位于 `data/private/`，二者都被 Git 忽略。
 
+
+### 一键执行个人组合研究
+
+当本地持仓和行情数据已经准备好后，建议使用统一入口。它按顺序执行：行情刷新与真实数据验收 → 组合风险报告 → 平衡/保守配置比较和 walk-forward 样本外检查。
+
+~~~bash
+python run_personal_portfolio_suite.py --refresh \
+  --holdings-csv data/private/holdings_snapshot.csv
+~~~
+
+如确认行情缓存足够新且覆盖完整，可改用 --use-cache。只有实际核实了账户现金余额，才传入 --cash 1234.56；省略现金参数时，当前持仓权重只按导入证券计算，结果会明确标注现金未提供，不会将未知现金写成已确认的 0。需要 ETF 发行人穿透时，按日期准备 DRAM 与 QQQ 的官方完整持仓快照后，分别重复传入 --lookthrough-snapshot。
+
+数据验收若为 BLOCKED，统一入口会停止，不会继续给出风险和配置结果；WARNING 会继续生成报告，但保留短历史、价格异常、ETF 穿透缺失或样本外证据不足等提示。主要结果位于：
+- outputs/personal_suite/personal_portfolio_suite.md：本次运行总览和阶段状态；
+- outputs/acceptance/real_data_acceptance.md：行情覆盖、数据质量和真实持仓验收；
+- outputs/personal_risk/personal_portfolio_risk_report.md：集中度、波动/回撤、风险贡献、相关性、压力测试及 ETF 穿透；
+- outputs/allocation_comparison/personal_allocation_comparison.md：当前持仓与平衡/保守/最小方差参考配置比较和 walk-forward 结果。
+
+该入口只在本地运行，不上传私人持仓；不会连接券商或下单。WARNING 状态下的最小方差权重只供研究，不能直接视为建议买入或卖出的目标。
+
+
 可使用 `python run_personal_portfolio.py --use-cache` 复用未过期且覆盖范围符合标的上市历史的缓存；对于配置中声明了 `regular_way_start_date` 的新上市证券（如 SKHY），缓存只要求与下载元数据及最新日期一致，不会因为其无法覆盖 2015 年之前的上市历史而每天重复下载。数据更新使用 yfinance/Yahoo Finance，适合研究和学习，不是审计级行情服务。此命令只发送标的代码请求行情，不会上传持股数量、成本、账户余额或私有 CSV。
 
 ### 共同历史长度说明

@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+"""Run the local personal-portfolio workflow in a guarded, auditable order.
+
+Sequence:
+1. Refresh/reuse market data and run local real-data acceptance.
+2. Stop if acceptance is BLOCKED.
+3. Generate personal risk and ETF look-through reports.
+4. Compare actual holdings with balanced/conservative reference allocations.
+
+No private holdings are uploaded and no broker orders are placed.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+from datetime import date, datetime, timezone
+from pathlib import Path
+from typing import Any, Sequence
+
+import portfolio_allocation_comparison as allocation
+import run_personal_portfolio as data_pipeline
+import run_personal_risk_analysis as risk_analysis
+
+ROOT = Path(__file__).resolve().parent
+DEFAULT_OUTPUT = ROOT / "outputs" / "personal_suite"
+
+
+def _write_summary(payload: dict[str, Any], output_dir: str | Path) -> tuple[Path, Path]:
+    target = Path(output_dir)
+    target.mkdir(parents=True, exist_ok=True)
+    json_path = target / "personal_portfolio_suite.json"
+    markdown_path = target / "personal_portfolio_suite.md"
+    json_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+
+    stages = payload["stages"]
+    lines = [
+        "# 个人组合一键研究报告",
+        "",
+        f"- 整体状态：**{payload['status']}**",
+        f"- 运行时间（UTC）：{payload['generated_at_utc']}",
+        f"- 现金口径：{payload['cash_note']}",
+        "",
+        "## 执行结果",
+        "",
+    ]
+    acceptance = stages["data_acceptance"]
+    lines.append(
+        f"- 数据验收：{acceptance['status']}；共同日收益观测："
+        f"{acceptance.get('common_return_observations', 'N/A')}"
+    )
+    risk = stages["risk_analysis"]
+    if risk["status"] == "SKIPPED":
+        lines.append(f"- 风险分析：未执行（{risk.get('reason', '数据验收未通过')}）")
+    elif risk["status"] == "FAILED":
+        lines.append(f"- 风险分析：失败（{risk.get('error', '未知错误')}）")
+    else:
+        lines.append(
+            f"- 风险分析：已生成；历史质量：{risk.get('history_quality', 'N/A')}；"
+            f"ETF 穿透：{risk.get('lookthrough_status', 'N/A')}；"
+            f"风险告警：{risk.get('alert_count', 'N/A')} 项"
+        )
+    compare = stages["allocation_comparison"]
+    if compare["status"] == "SKIPPED":
+        lines.append(f"- 配置比较：未执行（{compare.get('reason', '数据验收未通过')}）")
+    elif compare["status"] == "FAILED":
+        lines.append(f"- 配置比较：失败（{compare.get('error', '未知错误')}）")
+    else:
+        walk_forward = compare.get("walk_forward", {})
+        lines.append(
+            f"- 配置比较：已生成；共同历史：{compare.get('common_return_observations', 'N/A')} 个；"
+            f"Walk-forward：{walk_forward.get('status', 'N/A')}（"
+            f"{walk_forward.get('fold_count', 'N/A')} 折）"
+        )
+
+    if payload["warnings"]:
+        lines += ["", "## 需要留意", ""]
+        lines.extend(f"- {item}" for item in payload["warnings"])
+    lines += [
+        "",
+        "## 本次输出位置",
+        "",
+        f"- 数据验收报告：{acceptance.get('report_markdown', 'N/A')}",
+        f"- 风险报告：{risk.get('report_markdown', 'N/A')}",
+        f"- 配置比较报告：{compare.get('report_path', 'N/A')}",
+        "",
+        "## 使用边界",
+        "",
+        "- 本工具只在本机读取个人持仓和价格文件，不上传持仓股数、成本、账户余额或私有 CSV。",
+        "- 数据验收 BLOCKED 时不会继续计算风险与配置；WARNING 会保留告警并继续生成研究结果。",
+        "- 未提供现金时，当前持仓比例仅按导入证券计算；不会声称现金余额为零或代表已核实的全部资产。",
+        "- 未导入有日期的 DRAM/QQQ ETF 持仓快照时，ETF 穿透会标记缺失或不完整，不会用固定比例代替真实持仓。",
+        "- 风险、压力情景和优化结果用于研究复核，不构成买卖指令；程序不会连接券商或下单。",
+        "",
+    ]
+    markdown_path.write_text("\n".join(lines), encoding="utf-8")
+    return json_path, markdown_path
+
+
+def run_portfolio_suite(
+    *,
+    config_path: str | Path = data_pipeline.DEFAULT_CONFIG,
+    holdings_path: str | Path = data_pipeline.DEFAULT_HOLDINGS,
+    close_prices_path: str | Path = data_pipeline.DEFAULT_CLOSE,
+    adjusted_prices_path: str | Path = data_pipeline.DEFAULT_ADJUSTED,
+    acceptance_output_dir: str | Path = data_pipeline.DEFAULT_REPORTS,
+    risk_output_dir: str | Path = risk_analysis.DEFAULT_OUTPUT,
+    allocation_output_dir: str | Path = allocation.DEFAULT_OUTPUT,
+    group_caps_path: str | Path = risk_analysis.DEFAULT_GROUP_CAPS,
+    subgroup_caps_path: str | Path = risk_analysis.DEFAULT_SUBGROUP_CAPS,
+    stress_profile_path: str | Path = risk_analysis.DEFAULT_STRESS_PROFILE,
+    allocation_profiles_path: str | Path = allocation.DEFAULT_PROFILES,
+    output_dir: str | Path = DEFAULT_OUTPUT,
+    refresh: bool = True,
+    cash: float | None = None,
+    snapshot_paths: Sequence[str | Path] = (),
+    as_of_date: str | date | None = None,
+) -> dict[str, Any]:
+    """Run acceptance first, then risk and allocation reports unless blocked."""
+    if cash is not None:
+        try:
+            cash_value = float(cash)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("cash must be a finite non-negative USD amount.") from exc
+        if cash_value < 0:
+            raise ValueError("cash must be a finite non-negative USD amount.")
+    else:
+        cash_value = None
+
+    acceptance = data_pipeline.run_pipeline(
+        config_path=config_path,
+        holdings_path=holdings_path,
+        close_prices_path=close_prices_path,
+        adjusted_prices_path=adjusted_prices_path,
+        output_dir=acceptance_output_dir,
+        refresh=refresh,
+        as_of_date=as_of_date,
+    )
+    acceptance_status = str(acceptance.get("status", "UNKNOWN")).upper()
+    if acceptance_status not in {"PASS", "WARNING", "BLOCKED"}:
+        raise ValueError(f"Unexpected data-acceptance status: {acceptance_status!r}.")
+
+    warnings: list[str] = []
+    if acceptance_status == "WARNING":
+        warnings.append("数据验收存在 WARNING；请先阅读验收报告中的历史长度、行情异常和对账提示。")
+
+    stages: dict[str, dict[str, Any]] = {
+        "data_acceptance": {
+            "status": acceptance_status,
+            "as_of_date": acceptance.get("as_of_date"),
+            "position_count": acceptance.get("position_count"),
+            "common_return_observations": acceptance.get("common_return_observations"),
+            "short_history_tickers": acceptance.get("short_history_tickers", []),
+            "report_markdown": acceptance.get("report_markdown"),
+            "report_json": acceptance.get("report_json"),
+        },
+        "risk_analysis": {"status": "SKIPPED"},
+        "allocation_comparison": {"status": "SKIPPED"},
+    }
+
+    if acceptance_status == "BLOCKED":
+        stages["risk_analysis"]["reason"] = "数据验收为 BLOCKED，禁止继续解释风险指标。"
+        stages["allocation_comparison"]["reason"] = "数据验收为 BLOCKED，禁止继续生成配置方案。"
+        payload: dict[str, Any] = {
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "status": "BLOCKED",
+            "cash_source": "not_provided" if cash_value is None else "user_provided",
+            "cash_note": (
+                "未提供现金余额；如后续分析，仅按已导入证券计算比例。"
+                if cash_value is None else "已提供并将在分析中纳入现金余额。"
+            ),
+            "stages": stages,
+            "warnings": warnings + ["数据验收未通过；请修正 BLOCKER 项后重新运行。"],
+            "privacy": {
+                "private_holdings_uploaded": False,
+                "share_quantities_included_in_suite_manifest": False,
+                "cost_basis_included_in_suite_manifest": False,
+                "account_values_included_in_suite_manifest": False,
+                "broker_orders_sent": False,
+            },
+        }
+        _write_summary(payload, output_dir)
+        return payload
+
+    risk_result: dict[str, Any] | None = None
+    try:
+        risk_result = risk_analysis.run_personal_risk_report(
+            config_path=config_path,
+            holdings_path=holdings_path,
+            close_prices_path=close_prices_path,
+            adjusted_prices_path=adjusted_prices_path,
+            group_caps_path=group_caps_path,
+            subgroup_caps_path=subgroup_caps_path,
+            stress_profile_path=stress_profile_path,
+            output_dir=risk_output_dir,
+            cash=cash_value,
+            snapshot_paths=snapshot_paths,
+            as_of_date=as_of_date,
+        )
+        risk_summary = risk_result["summary"]
+        stages["risk_analysis"] = {
+            "status": "PASS",
+            "report_markdown": risk_summary.get("report_markdown"),
+            "history_quality": risk_summary.get("history_quality"),
+            "portfolio_return_observations": risk_summary.get("portfolio_return_observations"),
+            "alert_count": risk_summary.get("alert_count"),
+            "lookthrough_status": risk_summary.get("lookthrough_status"),
+            "lookthrough_funds_missing": risk_summary.get("lookthrough_funds_missing", []),
+        }
+        if risk_summary.get("lookthrough_status") == "partial_or_missing_or_stale":
+            warnings.append("DRAM/QQQ 的一项或多项有日期 ETF 持仓快照缺失、过期或不完整；发行人穿透敞口尚不能视为完整。")
+        if risk_summary.get("history_quality") == "under_one_trading_year":
+            warnings.append("组合共同历史不足约一年；波动率、相关性、VaR/CVaR 和风险贡献仅作初步估计。")
+    except (ValueError, OSError, RuntimeError, KeyError) as exc:
+        stages["risk_analysis"] = {"status": "FAILED", "error": f"{type(exc).__name__}: {exc}"}
+
+    try:
+        allocation_result = allocation.run_allocation_comparison(
+            config_path=config_path,
+            holdings_path=holdings_path,
+            close_prices_path=close_prices_path,
+            adjusted_prices_path=adjusted_prices_path,
+            profiles_path=allocation_profiles_path,
+            output_dir=allocation_output_dir,
+            cash=cash_value,
+            as_of_date=as_of_date,
+        )
+        allocation_summary = allocation_result["summary"]
+        walk_forward = allocation_summary.get("walk_forward", {})
+        stages["allocation_comparison"] = {
+            "status": "PASS",
+            "report_path": allocation_summary.get("report_path"),
+            "common_return_observations": allocation_summary.get("common_return_observations"),
+            "walk_forward": walk_forward,
+        }
+        if walk_forward.get("status") != "multiple_oos_folds":
+            warnings.append(
+                "Walk-forward 样本外证据不足或不可用；不要把最小方差权重当成稳定最优配置。"
+            )
+    except (ValueError, OSError, RuntimeError, KeyError) as exc:
+        stages["allocation_comparison"] = {"status": "FAILED", "error": f"{type(exc).__name__}: {exc}"}
+
+    failed_count = sum(
+        stages[key]["status"] == "FAILED"
+        for key in ("risk_analysis", "allocation_comparison")
+    )
+    completed_count = sum(
+        stages[key]["status"] == "PASS"
+        for key in ("risk_analysis", "allocation_comparison")
+    )
+    if failed_count and completed_count:
+        overall_status = "PARTIAL"
+    elif failed_count:
+        overall_status = "FAILED"
+    elif warnings:
+        overall_status = "WARNING"
+    else:
+        overall_status = "PASS"
+
+    payload = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "status": overall_status,
+        "cash_source": "not_provided" if cash_value is None else "user_provided",
+        "cash_note": (
+            "未提供现金余额；当前持仓比例仅按导入证券计算，不代表已核实的全部资产。"
+            if cash_value is None else "已提供现金余额并纳入组合净资产分母。"
+        ),
+        "stages": stages,
+        "warnings": warnings,
+        "privacy": {
+            "private_holdings_uploaded": False,
+            "share_quantities_included_in_suite_manifest": False,
+            "cost_basis_included_in_suite_manifest": False,
+            "account_values_included_in_suite_manifest": False,
+            "broker_orders_sent": False,
+        },
+    }
+    _write_summary(payload, output_dir)
+    return payload
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Run local personal portfolio acceptance, risk analysis and allocation comparison."
+    )
+    parser.add_argument("--config", type=Path, default=data_pipeline.DEFAULT_CONFIG)
+    parser.add_argument("--holdings-csv", type=Path, default=data_pipeline.DEFAULT_HOLDINGS)
+    parser.add_argument("--close-prices", type=Path, default=data_pipeline.DEFAULT_CLOSE)
+    parser.add_argument("--adjusted-prices", type=Path, default=data_pipeline.DEFAULT_ADJUSTED)
+    parser.add_argument("--acceptance-output-dir", type=Path, default=data_pipeline.DEFAULT_REPORTS)
+    parser.add_argument("--risk-output-dir", type=Path, default=risk_analysis.DEFAULT_OUTPUT)
+    parser.add_argument("--allocation-output-dir", type=Path, default=allocation.DEFAULT_OUTPUT)
+    parser.add_argument("--group-caps", type=Path, default=risk_analysis.DEFAULT_GROUP_CAPS)
+    parser.add_argument("--subgroup-caps", type=Path, default=risk_analysis.DEFAULT_SUBGROUP_CAPS)
+    parser.add_argument("--stress-profile", type=Path, default=risk_analysis.DEFAULT_STRESS_PROFILE)
+    parser.add_argument("--allocation-profiles", type=Path, default=allocation.DEFAULT_PROFILES)
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--cash", type=float, default=None, help="Optional verified cash balance in USD.")
+    parser.add_argument(
+        "--lookthrough-snapshot",
+        type=Path,
+        action="append",
+        default=[],
+        help="Dated DRAM/QQQ issuer snapshot JSON; repeat for each fund.",
+    )
+    parser.add_argument("--as-of-date", help="Analysis date YYYY-MM-DD.")
+    refresh = parser.add_mutually_exclusive_group()
+    refresh.add_argument("--refresh", dest="refresh", action="store_true", help="Force fresh market data.")
+    refresh.add_argument("--use-cache", dest="refresh", action="store_false", help="Reuse only valid fresh cache.")
+    parser.set_defaults(refresh=True)
+    args = parser.parse_args()
+    try:
+        result = run_portfolio_suite(
+            config_path=args.config,
+            holdings_path=args.holdings_csv,
+            close_prices_path=args.close_prices,
+            adjusted_prices_path=args.adjusted_prices,
+            acceptance_output_dir=args.acceptance_output_dir,
+            risk_output_dir=args.risk_output_dir,
+            allocation_output_dir=args.allocation_output_dir,
+            group_caps_path=args.group_caps,
+            subgroup_caps_path=args.subgroup_caps,
+            stress_profile_path=args.stress_profile,
+            allocation_profiles_path=args.allocation_profiles,
+            output_dir=args.output_dir,
+            refresh=args.refresh,
+            cash=args.cash,
+            snapshot_paths=args.lookthrough_snapshot,
+            as_of_date=args.as_of_date,
+        )
+    except (ValueError, OSError, RuntimeError) as exc:
+        parser.error(str(exc))
+    print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
+    if result["status"] in {"BLOCKED", "FAILED", "PARTIAL"}:
+        raise SystemExit(2)
+
+
+if __name__ == "__main__":
+    main()
