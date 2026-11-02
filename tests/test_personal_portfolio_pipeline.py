@@ -142,6 +142,7 @@ def test_run_pipeline_refreshes_reference_and_held_tickers_then_accepts(tmp_path
     assert set(market_kwargs["tickers"]) == {"SPY", "SOXX", "AAA", "BBB"}
     assert market_kwargs["refresh"] is True
     assert market_kwargs["benchmark"] == "SPY"
+    assert market_kwargs["short_history_tickers"] == []
     acceptance_args, acceptance_kwargs = calls["acceptance"]
     assert acceptance_args[0] == holdings_path
     assert acceptance_kwargs["minimum_common_observations"] == 60
