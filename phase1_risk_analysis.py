@@ -87,6 +87,7 @@ def cache_is_usable(
     end: str,
     max_age_hours: float = DEFAULT_MAX_CACHE_AGE_HOURS,
     now: datetime | None = None,
+    allow_short_history: bool = False,
 ) -> tuple[bool, str]:
     """Reject stale, truncated, legacy, or metadata-mismatched local cache."""
     meta_path = cache_metadata_path(ticker)
@@ -121,7 +122,9 @@ def cache_is_usable(
             return False, "cache request ended before requested end date"
         earliest_allowed = pd.Timestamp(start) + pd.offsets.BDay(3)
         latest_allowed = pd.Timestamp(end) - pd.offsets.BDay(2)
-        if data.empty or data.index.min() > earliest_allowed:
+        if data.empty:
+            return False, "cached observations are empty"
+        if not allow_short_history and data.index.min() > earliest_allowed:
             return False, "cached observations do not cover requested start date"
         if data.index.max() < latest_allowed:
             return False, "cached observations end too far before requested end date"
@@ -221,8 +224,13 @@ def get_ticker_data(
     refresh: bool = False,
     allow_stale_cache: bool = False,
     max_cache_age_hours: float = DEFAULT_MAX_CACHE_AGE_HOURS,
+    short_history_tickers: set[str] | None = None,
 ) -> pd.DataFrame:
-    """Use cache only when recent and covering the requested range."""
+    """Use cache only when recent and covering the requested range.
+
+    Explicitly declared short-history listings may start after the requested
+    history window; their cache still must match its metadata and current end date.
+    """
     cached = None
     cache_reason = "refresh requested" if refresh else "no local cache"
     if not refresh:
@@ -233,7 +241,12 @@ def get_ticker_data(
             print(f"Cache for {ticker} cannot be used: {cache_reason}; refreshing.")
     if cached is not None:
         usable, cache_reason = cache_is_usable(
-            ticker, cached, start=start, end=end, max_age_hours=max_cache_age_hours
+            ticker,
+            cached,
+            start=start,
+            end=end,
+            max_age_hours=max_cache_age_hours,
+            allow_short_history=ticker in (short_history_tickers or set()),
         )
         if usable:
             print(
@@ -446,8 +459,24 @@ def save_plots(adjusted_close: pd.DataFrame) -> None:
     plt.close(fig)
 
 
-def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_hours: float = DEFAULT_MAX_CACHE_AGE_HOURS, tickers: list[str] | None = None, start_date: str = START_DATE, end_date: str = END_DATE, benchmark: str = BENCHMARK) -> None:
+def main(
+    refresh: bool = False,
+    allow_stale_cache: bool = False,
+    max_cache_age_hours: float = DEFAULT_MAX_CACHE_AGE_HOURS,
+    tickers: list[str] | None = None,
+    start_date: str = START_DATE,
+    end_date: str = END_DATE,
+    benchmark: str = BENCHMARK,
+    short_history_tickers: list[str] | None = None,
+) -> None:
     active_tickers = TICKERS.copy() if tickers is None else [str(ticker).strip().upper() for ticker in tickers]
+    declared_short_history = {str(ticker).strip().upper() for ticker in (short_history_tickers or [])}
+    unknown_short_history = declared_short_history.difference(active_tickers)
+    if unknown_short_history:
+        raise ValueError(
+            "Short-history tickers must also be included in the active universe: "
+            f"{sorted(unknown_short_history)}."
+        )
     if not active_tickers or any(not ticker for ticker in active_tickers):
         raise ValueError("At least one valid ticker must be supplied.")
     if benchmark not in active_tickers:
@@ -473,7 +502,15 @@ def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_h
     for ticker in active_tickers:
         print(f"Loading {ticker} ...")
         try:
-            data = get_ticker_data(ticker, start_date, end_date, refresh=refresh, allow_stale_cache=allow_stale_cache, max_cache_age_hours=max_cache_age_hours)
+            data = get_ticker_data(
+                ticker,
+                start_date,
+                end_date,
+                refresh=refresh,
+                allow_stale_cache=allow_stale_cache,
+                max_cache_age_hours=max_cache_age_hours,
+                short_history_tickers=declared_short_history,
+            )
         except Exception as exc:
             raise RuntimeError(f"Download/validation failed for {ticker}: {exc}") from exc
         raw_data[ticker] = data
@@ -571,6 +608,12 @@ if __name__ == "__main__":
         help="optional comma-separated ticker list; the benchmark SPY must be included",
     )
     parser.add_argument(
+        "--short-history-tickers",
+        type=str,
+        default="",
+        help="comma-separated newly listed symbols whose valid history starts after --start-date",
+    )
+    parser.add_argument(
         "--max-cache-age-hours",
         type=float,
         default=DEFAULT_MAX_CACHE_AGE_HOURS,
@@ -592,4 +635,7 @@ if __name__ == "__main__":
         start_date=args.start_date,
         end_date=args.end_date,
         benchmark=args.benchmark.strip().upper(),
+        short_history_tickers=[
+            item.strip().upper() for item in args.short_history_tickers.split(",") if item.strip()
+        ],
     )

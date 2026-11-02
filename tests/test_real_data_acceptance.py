@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 import real_data_acceptance as acceptance
 
@@ -275,3 +276,46 @@ def test_non_iso_currency_label_is_blocked(tmp_path: Path) -> None:
     check = next(item for item in result["checks"] if item["code"] == "EXCHANGE_CURRENCY_UNVERIFIED")
     assert check["level"] == "BLOCKER"
     assert "三位字母币种代码" in check["message"]
+
+
+@pytest.mark.parametrize(
+    ("rows", "expected_level", "expected_text"),
+    [
+        (100, "WARNING", "低于目标研究长度 126 个"),
+        (150, "WARNING", "达到目标研究长度 126 个，但不足约一年的 252 个"),
+        (280, "PASS", "达到一年左右的基础历史长度"),
+    ],
+)
+def test_common_history_uses_minimum_target_and_one_year_thresholds(
+    tmp_path: Path,
+    rows: int,
+    expected_level: str,
+    expected_text: str,
+) -> None:
+    holdings = tmp_path / "holdings.csv"
+    close = tmp_path / "close.csv"
+    adjusted = tmp_path / "adjusted.csv"
+    _write_holdings(holdings)
+    _write_prices(close, ["AAA", "BBB"], rows=rows)
+    _write_prices(adjusted, ["AAA", "BBB"], rows=rows)
+
+    result = acceptance.run_acceptance(
+        holdings, close, adjusted, tmp_path / f"reports_{rows}",
+        as_of_date="2026-02-10",
+        minimum_common_observations=60,
+        target_common_observations=126,
+    )
+
+    check = next(item for item in result["checks"] if item["code"] == "COMMON_RETURN_HISTORY")
+    assert check["level"] == expected_level
+    assert expected_text in check["message"]
+    assert result["thresholds"]["target_common_return_observations"] == 126
+
+
+def test_target_common_history_cannot_be_below_hard_minimum(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="target_common_observations"):
+        acceptance.run_acceptance(
+            tmp_path / "holdings.csv", tmp_path / "close.csv", tmp_path / "adjusted.csv",
+            tmp_path / "reports", minimum_common_observations=60,
+            target_common_observations=59,
+        )

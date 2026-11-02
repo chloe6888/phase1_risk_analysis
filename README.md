@@ -748,11 +748,11 @@ python phase1_risk_analysis.py --tickers SPY,SOXX,NVDA,GOOGL,MU,SKHY,DRAM
 3. 在 Codespaces 终端执行：`python run_personal_portfolio.py --refresh`。
 4. 阅读 `outputs/acceptance/real_data_acceptance.md`。`BLOCKED` 表示不能进入正式风险分析；`WARNING` 表示数据可读但有需披露的限制。行情缓存位于 `data/raw/`，个人持仓位于 `data/private/`，二者都被 Git 忽略。
 
-可使用 `python run_personal_portfolio.py --use-cache` 复用未过期且覆盖范围完整的缓存；如果缓存不满足要求，脚本会重新下载。数据更新使用 yfinance/Yahoo Finance，适合研究和学习，不是审计级行情服务。此命令只发送标的代码请求行情，不会上传持股数量、成本、账户余额或私有 CSV。
+可使用 `python run_personal_portfolio.py --use-cache` 复用未过期且覆盖范围符合标的上市历史的缓存；对于配置中声明了 `regular_way_start_date` 的新上市证券（如 SKHY），缓存只要求与下载元数据及最新日期一致，不会因为其无法覆盖 2015 年之前的上市历史而每天重复下载。数据更新使用 yfinance/Yahoo Finance，适合研究和学习，不是审计级行情服务。此命令只发送标的代码请求行情，不会上传持股数量、成本、账户余额或私有 CSV。
 
 ### 共同历史长度说明
 
-`SKHY` 是 2026-07-13 开始常规交易的 Nasdaq ADR（1 份 ADR 代表 10 股韩国普通股）。因此，九项持仓的共同收益历史会被它的上市时间限制；本项目的最低验收门槛为 60 个共同日收益观测，126 个观测作为更理想的研究参考。未达到 126 时，报告必须保留“历史较短”的限制，不得将韩国本股的 KRW 价格直接拼接为 SKHY 的 USD 价格序列。
+`SKHY` 是 2026-07-13 开始常规交易的 Nasdaq ADR（1 份 ADR 代表 10 股韩国普通股）。因此，九项持仓的共同收益历史会被它的上市时间限制；本项目的最低验收门槛为 60 个共同日收益观测，目标研究长度为 126 个，约一年参考长度为 252 个。低于 60 个会阻断验收；60 至 125 个可以进入初步风险分析但会明确告警；达到 126 个仍会提示不足一年；达到 252 个才不因历史长度触发警告。不得将韩国本股的 KRW 价格直接拼接为 SKHY 的 USD 价格序列。
 
 ### ETF 穿透
 
