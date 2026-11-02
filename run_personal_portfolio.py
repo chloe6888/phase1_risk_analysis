@@ -158,6 +158,10 @@ def run_pipeline(
     tickers = list(dict.fromkeys(
         [universe["benchmark"], *universe["reference_tickers"], *holdings["ticker"].astype(str).tolist()]
     ))
+    short_history_tickers = sorted(
+        ticker for ticker, metadata in universe["symbols"].items()
+        if metadata.get("regular_way_start_date")
+    )
 
     market_data.main(
         refresh=refresh,
@@ -167,6 +171,7 @@ def run_pipeline(
         start_date=universe["start_date"],
         end_date=market_data.END_DATE,
         benchmark=universe["benchmark"],
+        short_history_tickers=short_history_tickers,
     )
     result = acceptance.run_acceptance(
         holdings_path,
@@ -176,12 +181,14 @@ def run_pipeline(
         as_of_date=as_of_date,
         max_staleness_days=7,
         minimum_common_observations=universe["minimum_common_observations"],
+        target_common_observations=universe["target_common_observations"],
     )
     return {
         "status": result["status"],
         "as_of_date": result["as_of_date"],
         "position_count": result.get("overview", {}).get("position_count"),
         "price_tickers": tickers,
+        "short_history_tickers": short_history_tickers,
         "common_return_observations": result.get("overview", {}).get("common_return_observations"),
         "report_markdown": str(Path(output_dir) / "real_data_acceptance.md"),
         "report_json": str(Path(output_dir) / "real_data_acceptance.json"),
