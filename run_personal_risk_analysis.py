@@ -47,7 +47,7 @@ def _load_json_object(path: str | Path) -> dict[str, Any]:
 
 def _pairwise_observation_counts(returns: pd.DataFrame) -> pd.DataFrame:
     tickers = list(returns.columns)
-    counts = pd.DataFrame(index=tickers, columns=tickers, dtype="int64")
+    counts = pd.DataFrame(0, index=tickers, columns=tickers, dtype="int64")
     for left in tickers:
         for right in tickers:
             counts.loc[left, right] = int((returns[left].notna() & returns[right].notna()).sum())
