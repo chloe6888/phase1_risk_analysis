@@ -3,9 +3,11 @@
 
 Sequence:
 1. Refresh/reuse market data and run local real-data acceptance.
-2. Stop if acceptance is BLOCKED.
+2. Stop all downstream work if acceptance is BLOCKED.
 3. Generate personal risk and ETF look-through reports.
-4. Compare actual holdings with balanced/conservative reference allocations.
+4. Compare actual holdings with balanced/conservative reference allocations and walk-forward tests.
+5. Refresh DCF/forward-PE research for held operating companies (ETFs excluded).
+6. Run rule-based add/hold/reduce review only after a successful valuation refresh.
 
 No private holdings are uploaded and no broker orders are placed.
 """
