@@ -183,3 +183,26 @@ def test_non_us_ticker_requires_explicit_matching_currency(tmp_path: Path) -> No
 
     assert result["status"] == "BLOCKED"
     assert any(item["code"] == "EXCHANGE_CURRENCY_UNVERIFIED" for item in result["checks"])
+
+
+def test_stale_adjusted_price_for_one_holding_is_blocked(tmp_path: Path) -> None:
+    holdings = tmp_path / "holdings.csv"
+    close = tmp_path / "close.csv"
+    adjusted = tmp_path / "adjusted.csv"
+    _write_holdings(holdings)
+    _write_prices(close, ["AAA", "BBB"])
+    dates = pd.bdate_range(end="2026-02-10", periods=280)
+    frame = pd.DataFrame({
+        "AAA": 50.0 + np.arange(280) * 0.03,
+        "BBB": 60.0 + np.arange(280) * 0.04,
+    }, index=dates)
+    frame.loc[frame.index[-8:], "BBB"] = np.nan
+    frame.index.name = "Date"
+    frame.to_csv(adjusted)
+
+    result = acceptance.run_acceptance(
+        holdings, close, adjusted, tmp_path / "reports", as_of_date="2026-02-10"
+    )
+
+    assert result["status"] == "BLOCKED"
+    assert any(item["code"] == "ADJUSTED_PRICE_TICKER_STALE" for item in result["checks"])

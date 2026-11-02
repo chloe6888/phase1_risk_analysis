@@ -140,7 +140,8 @@ def _render_report(payload: dict[str, Any]) -> str:
             ("raw_price_last_date", "未调整收盘价面板最新日期"),
             ("adjusted_price_last_date", "调整收盘价面板最新日期"),
             ("common_return_observations", "共同收益观测数"),
-            ("stale_ticker_count", "过期标的数量"),
+            ("stale_ticker_count", "过期未调整价格标的数量"),
+            ("stale_adjusted_ticker_count", "过期调整价格标的数量"),
             ("missing_raw_ticker_count", "未调整价格缺失标的数量"),
             ("missing_adjusted_ticker_count", "调整价格缺失标的数量"),
             ("concentration_alert_count", "集中度提醒数量"),
@@ -323,6 +324,35 @@ def run_acceptance(
                 )
             else:
                 add("ABNORMAL_DAILY_RETURNS", "PASS", "未发现绝对值超过 35% 的单日收益观测。")
+
+        stale_adjusted: list[str] = []
+        future_adjusted: list[str] = []
+        for ticker in sorted(held - set(missing_adj)):
+            observed = pd.to_numeric(adjusted_panel[ticker], errors="coerce").dropna()
+            if observed.empty:
+                stale_adjusted.append(ticker)
+                continue
+            last_date = pd.Timestamp(observed.index.max()).date()
+            age = (as_of - last_date).days
+            if age < 0:
+                future_adjusted.append(ticker)
+            elif age > max_staleness_days:
+                stale_adjusted.append(ticker)
+        overview["stale_adjusted_ticker_count"] = len(stale_adjusted)
+        if future_adjusted:
+            add(
+                "ADJUSTED_PRICE_FUTURE_DATE",
+                "BLOCKER",
+                f"调整价格面板存在晚于验收日的持仓标的数据：{', '.join(future_adjusted)}。",
+            )
+        if stale_adjusted:
+            add(
+                "ADJUSTED_PRICE_TICKER_STALE",
+                "BLOCKER",
+                f"持仓标的最新调整收盘价超过 {max_staleness_days} 个自然日：{', '.join(stale_adjusted)}。",
+            )
+        elif not future_adjusted:
+            add("ADJUSTED_PRICE_TICKER_FRESHNESS", "PASS", "所有持仓标的的调整收盘价均在允许日期范围内。")
 
         adjusted_end = pd.Timestamp(adjusted_panel.index.max()).date()
         if adjusted_end > as_of:
