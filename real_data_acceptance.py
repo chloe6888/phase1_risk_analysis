@@ -82,9 +82,14 @@ def _explicit_currency_issue(path: Path) -> str | None:
             (currency for suffix, currency in expected_by_suffix.items() if ticker.endswith(suffix)),
             None,
         )
-        supplied = str(row.get("currency") or "").strip().upper()
-        if not supplied:
+        raw_currency = row.get("currency")
+        if pd.isna(raw_currency):
             return f"{ticker or '某一持仓'} 的 currency 为空；请填写该证券实际报价币种。"
+        supplied = str(raw_currency).strip().upper()
+        if not supplied or supplied in {"NAN", "NONE", "NULL", "<NA>"}:
+            return f"{ticker or '某一持仓'} 的 currency 为空；请填写该证券实际报价币种。"
+        if len(supplied) != 3 or not supplied.isalpha():
+            return f"{ticker or '某一持仓'} 的 currency 格式无效；请填写三位字母币种代码（如 USD、HKD、KRW）。"
         if expected is not None and supplied != expected:
             return f"{ticker} 的代码后缀对应 {expected}，但文件填写为 {supplied}；请先核对报价币种。"
     return None
