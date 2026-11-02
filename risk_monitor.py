@@ -232,13 +232,6 @@ def analyze_risk_snapshot(
             "limit": 126,
             "message": f"Only {len(daily_returns)} common daily returns are available; volatility, drawdown and tail-risk estimates are preliminary.",
         })
-    elif len(daily_returns) < 252:
-        alerts.append({
-            "level": "info", "kind": "history_under_one_year",
-            "ticker": None, "group": None, "observed": int(len(daily_returns)),
-            "limit": 252,
-            "message": f"Only {len(daily_returns)} common daily returns are available; estimates cover less than roughly one trading year.",
-        })
     if annualized_volatility is not None and annualized_volatility > volatility_limit_annual:
         alerts.append({
             "level": "warning", "kind": "portfolio_volatility",
@@ -288,6 +281,12 @@ def analyze_risk_snapshot(
         "historical_start": history.index.min().date().isoformat() if not history.empty else None,
         "historical_end": history.index.max().date().isoformat() if not history.empty else None,
         "portfolio_return_observations": int(len(daily_returns)),
+        "history_quality": (
+            "insufficient" if len(daily_returns) < minimum_observations
+            else "preliminary_under_126" if len(daily_returns) < 126
+            else "under_one_trading_year" if len(daily_returns) < 252
+            else "one_trading_year_or_more"
+        ),
         "annualized_volatility": annualized_volatility,
         "max_drawdown": max_drawdown,
         "historical_var_95_one_period": var_95,
