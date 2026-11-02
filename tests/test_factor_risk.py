@@ -102,7 +102,7 @@ def test_weighted_portfolio_returns_use_cash_as_zero_return_and_reject_bad_weigh
     assert summary["cash_weight"] == pytest.approx(0.2)
     with pytest.raises(ValueError, match="no more than 100"):
         app.normalize_portfolio_weights({"AAA": 0.8, "BBB": 0.3})
-    with pytest.raises(ValueError, match="at least one portfolio weight"):
+    with pytest.raises(ValueError, match="At least one portfolio weight"):
         app.normalize_portfolio_weights({"AAA": 0.0, "BBB": 0.0})
 
 
