@@ -84,6 +84,7 @@ def test_risk_monitor_cli_writes_snapshot_and_alerts(tmp_path: Path) -> None:
     pd.DataFrame({
         "ticker": ["AAA", "BBB"], "shares": [10, 1],
         "risk_group": ["tech", "tech"],
+        "subgroup": ["software", "software"],
     }).to_csv(holdings_path, index=False)
     group_caps = tmp_path / "group_caps.json"
     group_caps.write_text(json.dumps({"tech": 0.5}), encoding="utf-8")
