@@ -60,7 +60,7 @@ def test_etf_is_classified_as_lookthrough_not_company_valuation() -> None:
     etf.loc[:, "subgroup"] = "memory"
     etf_prices = prices[["AAA"]].rename(columns={"AAA":"DRAM"})
     result, _ = evaluate_position_decisions(
-        etf, etf_prices, pd.DataFrame(), policy(),
+        etf, etf_prices, pd.DataFrame(), policy(), cash=1000.0,
         as_of_date="2026-10-30", etf_tickers=("DRAM",),
     )
     assert result.iloc[0]["decision"] == "ETF_LOOKTHROUGH_ONLY"
