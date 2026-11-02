@@ -577,9 +577,9 @@ python run_valuation.py \
 
 ## 个股估值研究（DCF + 远期 PE）
 
-仪表盘新增“个股估值”页，首批配置标的为 GOOG、NVDA、MU、SKHY。估值任务与组合研究任务使用独立的成功结果指针，估值失败不会覆盖上一次成功估值，也不会覆盖组合研究报告。
+仪表盘新增“个股估值”页。默认估值范围现在对应实际持有的七只经营性公司：AVGO、GOOG、LRCX、MRVL、MU、OKTA、SKHY。NVDA 保留为可选研究标的，但不属于当前组合默认估值列表。DRAM 和 QQQ 是 ETF，不使用公司 DCF/PE；应通过带日期的 ETF 持仓文件分析底层发行人敞口。估值任务与组合研究任务使用独立的成功结果指针，估值失败不会覆盖上一次成功估值，也不会覆盖组合研究报告。
 
-可在项目根目录运行 `python run_valuation.py --tickers GOOG,NVDA,MU,SKHY`。首次运行会从 Yahoo Finance 获取报价、远期 EPS、自由现金流、现金、负债和经营指标；默认缓存有效期为 7 天。强制刷新可增加 `--refresh`。只有明确接受价格与财务数据过期风险时，才使用 `--allow-stale-cache`。
+可在项目根目录运行 `python run_valuation.py`，默认分析配置中的七只公司持仓；也可显式运行 `python run_valuation.py --tickers AVGO,GOOG,LRCX,MRVL,MU,OKTA,SKHY`。首次运行会从 Yahoo Finance 获取报价、远期 EPS、自由现金流、现金、负债和经营指标；默认缓存有效期为 7 天。强制刷新可增加 `--refresh`。只有明确接受价格与财务数据过期风险时，才使用 `--allow-stale-cache`。
 
 DCF 与远期 PE 分别输出悲观、基准和乐观情景。买入观察线按基准估值与安全边际计算，卖出复核线按基准估值与人工设置的溢价计算；这些是估值复核区间，不是价格预测或自动交易信号。所有假设可在 `config/valuation_assumptions.json` 编辑，并应在每次财报发布后复核。
 
@@ -854,3 +854,10 @@ Walk-forward 默认使用 60 个共同日收益训练、随后 21 个交易日�
 - 平衡/保守方案是受约束等权的参考配置，现金比例是目标预算，不是从账户读取的真实现金。
 - 比较采用固定权重的历史日收益代理，不复原实际历史调仓；Walk-forward 才按测试区段滚动拟合，但仍未计入交易费、税费、滑点或市场冲击。
 - 配置比较只生成研究报告，不连接券商、不执行真实订单；最终执行前需核对券商可交易整手/碎股规则和价格。
+
+
+### 当前持仓估值范围与假设纪律
+
+config/valuation_assumptions.json 默认范围包含七只实际持有的经营性股票：AVGO、GOOG、LRCX、MRVL、MU、OKTA 和 SKHY；NVDA 保留为可选研究标的，不进入默认组合估值。DRAM、QQQ 是基金份额，不是经营性公司；它们的研究入口是基金持仓穿透和发行人风险敞口，不是将 ETF 的财务字段套入公司 DCF/PE。配置中的增长率、折现率、终值增长率和合理 PE 均为人工设定的敏感性分析起点，不是分析师一致预期或目标价。
+
+AVGO 兼具半导体与基础设施软件业务，LRCX、MRVL、MU、SKHY 按周期性行业处理；在没有跨周期正常化 FCF 前，DCF 结果必须结合周期分析，置信度保持低。OKTA 的 PE 依赖供应商能否提供正数、有效的 forward EPS；若缺失或非正则禁用 PE。SKHY 的 1 ADS 对应 10 股韩国普通股，其 ADR 每 ADS 的 EPS/稀释股数单位仍未核验，因此 DCF 与 PE 均保持暂停；不能自行把普通股 KRW 财务数值当作 ADS USD 每股数值。只有取得可追溯证据后，才允许修改 per_share_basis_verified。

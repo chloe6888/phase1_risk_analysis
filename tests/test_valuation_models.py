@@ -213,9 +213,18 @@ def test_repository_starter_assumptions_validate_for_watchlist() -> None:
 
     config_path = Path(__file__).resolve().parents[1] / "config" / "valuation_assumptions.json"
     config = load_config(config_path)
-    assert {"GOOG", "NVDA", "MU", "SKHY"}.issubset(config["tickers"])
-    for symbol in ("GOOG", "NVDA", "MU", "SKHY"):
-        validate_assumptions(ticker_assumptions(config, symbol))
+    expected = {"AVGO", "GOOG", "LRCX", "MRVL", "MU", "OKTA", "SKHY"}
+    assert set(config["default_tickers"]) == expected
+    assert not ({"DRAM", "QQQ"} & set(config["tickers"]))
+    assert "NVDA" in config["tickers"]
+    assert config["included_scope"]["optional_research_tickers"] == ["NVDA"]
+    assert set(config["included_scope"]["excluded_etfs"]) == {"DRAM", "QQQ"}
+    for symbol in sorted(expected | {"NVDA"}):
+        assumptions = ticker_assumptions(config, symbol)
+        validate_assumptions(assumptions)
+    skhy = ticker_assumptions(config, "SKHY")
+    assert skhy["per_share_basis_verified"] is False
+    assert skhy["adr_underlying_shares_per_ads"] == 10
 
 
 def test_run_valuation_writes_report_and_manifest_without_network(

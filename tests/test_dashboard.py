@@ -410,3 +410,20 @@ def test_streamlit_dashboard_renders_research_toolbox_without_outputs() -> None:
     page = AppTest.from_file(str(app.ROOT / "dashboard.py"), default_timeout=30).run()
     assert not page.exception
     assert any("研究工具箱" in element.value for element in page.subheader)
+
+
+
+def test_valuation_dashboard_uses_held_company_universe_and_excludes_etfs() -> None:
+    from streamlit.testing.v1 import AppTest
+
+    page = AppTest.from_file(str(app.ROOT / "dashboard.py"), default_timeout=20).run()
+    assert not page.exception
+    selector = next(
+        widget for widget in page.multiselect
+        if widget.label == "选择需要研究的公司股票（ETF 请在组合穿透页分析）"
+    )
+    expected = ["AVGO", "GOOG", "LRCX", "MRVL", "MU", "OKTA", "SKHY"]
+    assert selector.options == expected
+    assert selector.value == expected
+    assert "DRAM" not in selector.options
+    assert "QQQ" not in selector.options
