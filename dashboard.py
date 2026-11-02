@@ -1362,9 +1362,9 @@ def main() -> None:
         st.subheader("个股基本面估值")
         st.caption("本页回答：当前价格相对不同经营假设下的估值区间处于什么位置？DCF（现金流折现）和远期 PE（市盈率）是交叉检查工具，不是目标价承诺。")
         valuation_symbols = st.multiselect(
-            "选择需要研究的股票",
-            options=["GOOG", "NVDA", "MU", "SKHY"],
-            default=["GOOG", "NVDA", "MU", "SKHY"],
+            "选择需要研究的公司股票（ETF 请在组合穿透页分析）",
+            options=["AVGO", "GOOG", "LRCX", "MRVL", "MU", "OKTA", "SKHY"],
+            default=["AVGO", "GOOG", "LRCX", "MRVL", "MU", "OKTA", "SKHY"],
             key="valuation_symbols",
         )
         force_valuation_refresh = st.checkbox(
@@ -1443,7 +1443,7 @@ def main() -> None:
                 with st.expander("查看完整估值研究报告"):
                     st.markdown(valuation_report_path.read_text(encoding="utf-8"))
         else:
-            st.info("还没有估值结果。选择 GOOG、NVDA、MU 或 SKHY，点击“运行估值分析”开始。")
+            st.info("还没有估值结果。选择 AVGO、GOOG、LRCX、MRVL、MU、OKTA 或 SKHY，点击“运行估值分析”开始。DRAM 和 QQQ 是 ETF，请使用 ETF 持仓穿透分析。")
 
         with st.expander("估值模型假设与修改方式"):
             st.code("config/valuation_assumptions.json", language="text")
