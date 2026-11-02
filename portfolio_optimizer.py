@@ -128,7 +128,7 @@ def _project_hierarchical_capped_budget(
     subgroup_indices: Mapping[str, np.ndarray],
     subgroup_caps: Mapping[str, float],
     budget: float,
-    iterations: int = 80,
+    iterations: int = 40,
 ) -> np.ndarray:
     """Project onto a long-only budget with asset, parent-group and child caps.
 
