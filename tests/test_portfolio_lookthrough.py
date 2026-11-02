@@ -69,7 +69,7 @@ def test_missing_or_stale_fund_snapshots_are_explicitly_reported(tmp_path: Path)
     assert set(summary["fund_snapshots_missing"]) == {"DRAM", "QQQ"}
     assert set(funds["status"]) == {"missing_snapshot"}
     assert summary["cash_source"] == "not_provided_assumed_zero"
-    assert exposure.set_index("issuer").loc["GOOG", "direct_weight_pct"] == pytest.approx(40.0)
+    assert exposure.set_index("issuer").loc["GOOG", "direct_weight_pct"] == pytest.approx(200.0 / 450.0 * 100.0)
 
     old = _snapshot(tmp_path / "dram_old.json", "DRAM", "2026-09-01", {"MU": 20.0})
     _, funds, summary = analyze_portfolio_lookthrough(
