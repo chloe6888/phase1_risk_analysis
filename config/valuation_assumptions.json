@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Editable starter valuation assumptions for the seven operating-company holdings. These are analyst-configured scenarios, not market consensus or company guidance. DRAM and QQQ are ETFs and deliberately excluded from company DCF/PE; use dated issuer look-through instead. Review each ticker after every earnings release.",
+  "description": "Editable starter valuation assumptions. default_tickers covers the seven held operating companies; optional research tickers may remain configured. These are analyst-configured scenarios, not market consensus or company guidance. DRAM and QQQ are ETFs and deliberately excluded from company DCF/PE; use dated issuer look-through instead.",
   "default_settings": {
     "margin_of_safety": 0.25,
     "overvaluation_premium": 0.2,
@@ -208,6 +208,33 @@
           "cost_of_equity": 0.1
         }
       }
+    },
+    "NVDA": {
+      "cyclical": false,
+      "assumption_source": "初始研究假设（人工设定，非市场一致预期；可选研究标的，不属于当前持仓）",
+      "notes": "可选研究标的，不计入当前九项组合。关注数据中心收入、毛利率、客户资本开支、产品迭代、出口限制与现金流转化。增长假设必须由订单、收入和利润率验证。",
+      "per_share_basis_verified": true,
+      "per_share_basis_note": "NASDAQ 普通股报价单位；仍需与最新公司披露及供应商数据口径交叉核验。",
+      "scenarios": {
+        "bear": {
+          "fcf_growth": 0.05,
+          "terminal_growth": 0.02,
+          "fair_pe": 18,
+          "cost_of_equity": 0.105
+        },
+        "base": {
+          "fcf_growth": 0.12,
+          "terminal_growth": 0.025,
+          "fair_pe": 23,
+          "cost_of_equity": 0.1
+        },
+        "bull": {
+          "fcf_growth": 0.2,
+          "terminal_growth": 0.03,
+          "fair_pe": 28,
+          "cost_of_equity": 0.095
+        }
+      }
     }
   },
   "included_scope": {
@@ -220,9 +247,21 @@
       "OKTA",
       "SKHY"
     ],
+    "optional_research_tickers": [
+      "NVDA"
+    ],
     "excluded_etfs": {
       "DRAM": "ETF; analyze using dated fund holdings and underlying issuer look-through, not company DCF/PE.",
       "QQQ": "ETF; analyze using dated fund holdings and underlying issuer look-through, not company DCF/PE."
     }
-  }
+  },
+  "default_tickers": [
+    "AVGO",
+    "GOOG",
+    "LRCX",
+    "MRVL",
+    "MU",
+    "OKTA",
+    "SKHY"
+  ]
 }
