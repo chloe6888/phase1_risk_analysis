@@ -180,6 +180,7 @@ def run_acceptance(
     as_of_date: date | str | None = None,
     max_staleness_days: int = 7,
     minimum_common_observations: int = 60,
+    target_common_observations: int = 126,
 ) -> dict[str, Any]:
     """Validate local holdings and price panels without exposing position amounts."""
     as_of = _parse_as_of(as_of_date)
@@ -187,6 +188,8 @@ def run_acceptance(
         raise ValueError("max_staleness_days must be non-negative.")
     if minimum_common_observations < 2:
         raise ValueError("minimum_common_observations must be at least 2.")
+    if target_common_observations < minimum_common_observations:
+        raise ValueError("target_common_observations must be at least minimum_common_observations.")
 
     checks: list[dict[str, Any]] = []
 
@@ -309,11 +312,17 @@ def run_acceptance(
                     "BLOCKER",
                     f"持仓标的共同收益观测仅 {common_count} 个，低于最低要求 {minimum_common_observations} 个。",
                 )
+            elif common_count < target_common_observations:
+                add(
+                    "COMMON_RETURN_HISTORY",
+                    "WARNING",
+                    f"共同收益观测为 {common_count} 个；达到最低计算要求，但低于目标研究长度 {target_common_observations} 个。",
+                )
             elif common_count < 252:
                 add(
                     "COMMON_RETURN_HISTORY",
                     "WARNING",
-                    f"共同收益观测为 {common_count} 个；满足最低计算要求，但不足约一年的 252 个交易日。",
+                    f"共同收益观测为 {common_count} 个；达到目标研究长度 {target_common_observations} 个，但不足约一年的 252 个交易日。",
                 )
             else:
                 add("COMMON_RETURN_HISTORY", "PASS", f"共同收益观测为 {common_count} 个，达到一年左右的基础历史长度。")
@@ -451,6 +460,7 @@ def run_acceptance(
         "thresholds": {
             "max_staleness_calendar_days": max_staleness_days,
             "minimum_common_return_observations": minimum_common_observations,
+            "target_common_return_observations": target_common_observations,
             "one_year_reference_observations": 252,
             "abnormal_daily_return_absolute_threshold": 0.35,
         },
@@ -476,6 +486,7 @@ def main() -> None:
     parser.add_argument("--as-of-date", help="Override local validation date (YYYY-MM-DD), primarily for repeatable tests.")
     parser.add_argument("--max-staleness-days", type=int, default=7)
     parser.add_argument("--minimum-common-observations", type=int, default=60)
+    parser.add_argument("--target-common-observations", type=int, default=126)
     args = parser.parse_args()
     try:
         result = run_acceptance(
@@ -486,6 +497,7 @@ def main() -> None:
             as_of_date=args.as_of_date,
             max_staleness_days=args.max_staleness_days,
             minimum_common_observations=args.minimum_common_observations,
+            target_common_observations=args.target_common_observations,
         )
     except ValueError as exc:
         parser.error(str(exc))
