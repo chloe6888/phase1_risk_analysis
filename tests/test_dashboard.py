@@ -427,3 +427,59 @@ def test_valuation_dashboard_uses_held_company_universe_and_excludes_etfs() -> N
     assert selector.value == expected
     assert "DRAM" not in selector.options
     assert "QQQ" not in selector.options
+
+
+
+def test_personal_risk_allocation_and_decision_tools_are_allowlisted() -> None:
+    expected = {
+        "run_personal_risk_analysis.py",
+        "portfolio_allocation_comparison.py",
+        "position_decision_rules.py",
+    }
+    assert expected.issubset(app.LOCAL_TOOL_SCRIPTS)
+    for script in expected:
+        ok, output = app.run_local_tool(script, ["--help"], timeout_seconds=15)
+        assert ok, f"{script} help failed: {output}"
+
+
+def test_dashboard_exposes_personal_risk_allocation_and_cash_confirmation_controls() -> None:
+    from streamlit.testing.v1 import AppTest
+
+    page = AppTest.from_file(str(app.ROOT / "dashboard.py"), default_timeout=30).run()
+    assert not page.exception
+
+    expected_buttons = {
+        "运行加减仓规则复核",
+        "运行个人组合风险分析",
+        "运行资产配置比较",
+    }
+    assert expected_buttons.issubset({widget.label for widget in page.button})
+
+    cash_checks = {
+        "我已核实账户可用现金（用于加仓规则）",
+        "我已核实账户现金余额（用于风险分母）",
+        "我已核实账户现金余额（用于当前组合权重）",
+    }
+    for label in cash_checks:
+        widget = next(item for item in page.checkbox if item.label == label)
+        assert widget.value is False
+
+    cash_inputs = {
+        "已核实可用现金（USD）",
+        "已核实账户现金（USD）",
+    }
+    for label in cash_inputs:
+        widgets = [item for item in page.number_input if item.label == label]
+        assert widgets
+        assert all(item.disabled for item in widgets)
+
+
+def test_dashboard_local_tool_rejects_unlisted_script_without_running_process(monkeypatch) -> None:
+    import pytest
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("subprocess.run must not be reached for an unlisted script")
+
+    monkeypatch.setattr(app.subprocess, "run", fail_if_called)
+    with pytest.raises(ValueError, match="Unsupported local tool"):
+        app.run_local_tool("arbitrary_script.py", [])

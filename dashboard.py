@@ -90,6 +90,9 @@ LOCAL_TOOL_SCRIPTS = {
     "factor_risk.py",
     "paper_trading.py",
     "risk_monitor.py",
+    "run_personal_risk_analysis.py",
+    "portfolio_allocation_comparison.py",
+    "position_decision_rules.py",
 }
 
 
@@ -1051,8 +1054,8 @@ def main() -> None:
         except Exception as exc:
             st.error(f"本地持仓文件无法解析：{exc}")
 
-    overview_tab, decision_tab, risk_tab, backtest_tab, validation_tab, memory_tab, valuation_tab, tools_tab, files_tab = st.tabs(
-        ["账户概览", "投资决策复核", "组合风险", "策略回测", "稳健性检验", "存储主题", "个股估值", "研究工具箱", "研究报告与文件"]
+    overview_tab, decision_tab, risk_tab, allocation_tab, backtest_tab, validation_tab, memory_tab, valuation_tab, tools_tab, files_tab = st.tabs(
+        ["账户概览", "投资决策复核", "组合风险", "资产配置比较", "策略回测", "稳健性检验", "存储主题", "个股估值", "研究工具箱", "研究报告与文件"]
     )
 
     with overview_tab:
@@ -1180,6 +1183,45 @@ def main() -> None:
     with decision_tab:
         st.subheader("投资决策复核")
         st.caption("本页回答：哪些持仓值得进一步复核？当前估值假设与持仓风险是否一致？这里提供研究依据，不生成自动买卖指令。")
+
+        st.markdown("### 规则化加减仓复核")
+        st.caption("运行只读规则引擎：结合当前市值、单股/主题/子主题上限、DCF 与远期 PE 双模型、数据日期和报价一致性。不会自动交易。")
+        decision_cash_confirmed = st.checkbox(
+            "我已核实账户可用现金（用于加仓规则）",
+            value=False,
+            key="decision_cash_confirmed",
+        )
+        decision_cash = st.number_input(
+            "已核实可用现金（USD）",
+            min_value=0.0,
+            value=0.0,
+            step=100.0,
+            disabled=not decision_cash_confirmed,
+            key="decision_cash_usd",
+        )
+        if st.button("运行加减仓规则复核", key="run_position_decision_review"):
+            decision_args = ["--cash", f"{float(decision_cash):.2f}"] if decision_cash_confirmed else []
+            with st.spinner("正在读取本地持仓、行情和估值快照……"):
+                ok, output = run_local_tool(
+                    "position_decision_rules.py", decision_args, timeout_seconds=900
+                )
+            if ok:
+                st.success("规则复核完成。以下是研究复核状态，不是买卖订单。")
+                st.session_state["position_decision_last_run"] = output
+            else:
+                st.error("规则复核未完成，请检查本地持仓、最新 Close 行情和估值报告。")
+                st.code(output)
+        decision_report_path = OUTPUT_DIR / "position_decisions" / "position_decision_review.md"
+        decision_csv_path = OUTPUT_DIR / "position_decisions" / "position_decision_review.csv"
+        if decision_report_path.is_file():
+            st.markdown(decision_report_path.read_text(encoding="utf-8"))
+            decision_table = read_csv(decision_csv_path)
+            if decision_table is not None:
+                with st.expander("查看机器可读的逐项规则结果"):
+                    st.dataframe(_display_frame(decision_table), hide_index=True, use_container_width=True)
+        else:
+            st.info("尚无规则复核报告。需要先完成真实行情验收和个股估值；未确认现金时系统不会给出加仓观察状态。")
+
         same_holdings = _holdings_match_snapshot(imported_positions, latest_holdings)
         review_holdings = latest_holdings if same_holdings else imported_positions
         if imported_positions is not None and latest_holdings is not None and not same_holdings:
@@ -1224,6 +1266,40 @@ def main() -> None:
     with risk_tab:
         st.subheader("组合风险")
         st.caption("本页回答：组合波动有多大？哪些持仓贡献了主要风险？历史最大回撤是多少？假设市场冲击下可能损失多少？")
+
+        st.markdown("### 当前九项持仓统一风险报告")
+        st.caption("此报告使用个人持仓文件、最新未复权 Close 和复权 Adj Close；现金未确认时会明确显示为未提供。")
+        risk_cash_confirmed = st.checkbox(
+            "我已核实账户现金余额（用于风险分母）",
+            value=False,
+            key="risk_cash_confirmed",
+        )
+        risk_cash = st.number_input(
+            "已核实账户现金（USD）",
+            min_value=0.0,
+            value=0.0,
+            step=100.0,
+            disabled=not risk_cash_confirmed,
+            key="risk_cash_usd",
+        )
+        if st.button("运行个人组合风险分析", key="run_personal_risk_analysis"):
+            risk_args = ["--cash", f"{float(risk_cash):.2f}"] if risk_cash_confirmed else []
+            with st.spinner("正在计算组合风险贡献、滚动风险、相关性、压力情景和 ETF 穿透状态……"):
+                ok, output = run_local_tool(
+                    "run_personal_risk_analysis.py", risk_args, timeout_seconds=900
+                )
+            if ok:
+                st.success("个人组合风险报告已更新。")
+                st.session_state["personal_risk_last_run"] = output
+            else:
+                st.error("风险分析未完成，请确认已运行真实行情验收并且本地文件齐全。")
+                st.code(output)
+        personal_risk_report = OUTPUT_DIR / "personal_risk" / "personal_portfolio_risk_report.md"
+        if personal_risk_report.is_file():
+            st.markdown(personal_risk_report.read_text(encoding="utf-8"))
+        else:
+            st.info("尚无个人组合风险报告。请先运行真实行情数据验收。")
+
         if portfolio:
             risk_cols = st.columns(4)
             risk_cols[0].metric("年化波动率", _pct(portfolio.get("annualized_volatility")), help=RISK_METRIC_EXPLANATIONS["年化波动率"])
@@ -1292,6 +1368,48 @@ def main() -> None:
             st.dataframe(_display_frame(stress), hide_index=True, use_container_width=True)
         if contributions is None and rolling is None and drawdown is None and stress is None:
             st.info("目前还没有风险分析结果。完成一次研究后，这里会展示风险贡献、历史回撤和压力测试。")
+
+    with allocation_tab:
+        st.subheader("资产配置比较")
+        st.caption("同一组行情历史下，对照当前实际持仓、平衡型受约束等权、平衡型历史最小方差和保守型受约束等权。目标现金是模型预算，不代表账户实际现金。")
+        allocation_cash_confirmed = st.checkbox(
+            "我已核实账户现金余额（用于当前组合权重）",
+            value=False,
+            key="allocation_cash_confirmed",
+        )
+        allocation_cash = st.number_input(
+            "已核实账户现金（USD）",
+            min_value=0.0,
+            value=0.0,
+            step=100.0,
+            disabled=not allocation_cash_confirmed,
+            key="allocation_cash_usd",
+        )
+        if st.button("运行资产配置比较", key="run_allocation_comparison"):
+            allocation_args = ["--cash", f"{float(allocation_cash):.2f}"] if allocation_cash_confirmed else []
+            with st.spinner("正在计算四种配置、历史风险和 Walk-forward 样本外区段……"):
+                ok, output = run_local_tool(
+                    "portfolio_allocation_comparison.py", allocation_args, timeout_seconds=900
+                )
+            if ok:
+                st.success("资产配置比较报告已更新。")
+                st.session_state["allocation_comparison_last_run"] = output
+            else:
+                st.error("配置比较未完成，请检查行情面板、持仓分类和共同历史长度。")
+                st.code(output)
+        allocation_report = OUTPUT_DIR / "allocation_comparison" / "personal_allocation_comparison.md"
+        allocation_metrics = read_csv(OUTPUT_DIR / "allocation_comparison" / "allocation_scenario_metrics.csv")
+        allocation_weights = read_csv(OUTPUT_DIR / "allocation_comparison" / "allocation_scenario_weights.csv")
+        if allocation_report.is_file():
+            st.markdown(allocation_report.read_text(encoding="utf-8"))
+            if allocation_metrics is not None:
+                with st.expander("查看配置风险指标明细"):
+                    st.dataframe(_display_frame(allocation_metrics), hide_index=True, use_container_width=True)
+            if allocation_weights is not None:
+                with st.expander("查看每个方案的目标权重"):
+                    st.dataframe(_display_frame(allocation_weights), hide_index=True, use_container_width=True)
+        else:
+            st.info("尚无配置比较报告。需要先完成行情验收；由于 SKHY 的 ADR 历史较短，共同样本可能限制 Walk-forward 证据。")
 
     with backtest_tab:
         st.subheader("历史基准回测（仅供参考）")
