@@ -3,9 +3,11 @@
 
 Sequence:
 1. Refresh/reuse market data and run local real-data acceptance.
-2. Stop if acceptance is BLOCKED.
+2. Stop all downstream work if acceptance is BLOCKED.
 3. Generate personal risk and ETF look-through reports.
-4. Compare actual holdings with balanced/conservative reference allocations.
+4. Compare actual holdings with balanced/conservative reference allocations and walk-forward tests.
+5. Refresh DCF/forward-PE research for held operating companies (ETFs excluded).
+6. Run rule-based add/hold/reduce review only after a successful valuation refresh.
 
 No private holdings are uploaded and no broker orders are placed.
 """
@@ -13,16 +15,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
 import portfolio_allocation_comparison as allocation
+import position_decision_rules as decision_rules
 import run_personal_portfolio as data_pipeline
 import run_personal_risk_analysis as risk_analysis
+import run_valuation as valuation_pipeline
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_OUTPUT = ROOT / "outputs" / "personal_suite"
+DEFAULT_VALUATION_OUTPUT = ROOT / "outputs" / "valuation"
+DEFAULT_DECISION_OUTPUT = ROOT / "outputs" / "position_decisions"
 
 
 def _write_summary(payload: dict[str, Any], output_dir: str | Path) -> tuple[Path, Path]:
@@ -74,6 +81,25 @@ def _write_summary(payload: dict[str, Any], output_dir: str | Path) -> tuple[Pat
             f"Walk-forward：{walk_forward.get('status', 'N/A')}（"
             f"{walk_forward.get('fold_count', 'N/A')} 折）"
         )
+    valuation = stages["valuation_research"]
+    if valuation["status"] == "SKIPPED":
+        lines.append(f"- 基本面估值：未执行（{valuation.get('reason', '数据验收未通过')}）")
+    elif valuation["status"] == "FAILED":
+        lines.append(f"- 基本面估值：失败（{valuation.get('error', '未知错误')}）")
+    else:
+        lines.append(
+            f"- 基本面估值：已生成；覆盖 {valuation.get('ticker_count', 'N/A')} 家经营性公司；"
+            f"数据状态统计：{valuation.get('validation_status_counts', {})}"
+        )
+    decision = stages["position_decision_review"]
+    if decision["status"] == "SKIPPED":
+        lines.append(f"- 加减仓规则复核：未执行（{decision.get('reason', '估值流程未完成')}）")
+    elif decision["status"] == "FAILED":
+        lines.append(f"- 加减仓规则复核：失败（{decision.get('error', '未知错误')}）")
+    else:
+        lines.append(
+            f"- 加减仓规则复核：已生成；规则结果统计：{decision.get('decision_counts', {})}"
+        )
 
     if payload["warnings"]:
         lines += ["", "## 需要留意", ""]
@@ -85,6 +111,8 @@ def _write_summary(payload: dict[str, Any], output_dir: str | Path) -> tuple[Pat
         f"- 数据验收报告：{acceptance.get('report_markdown', 'N/A')}",
         f"- 风险报告：{risk.get('report_markdown', 'N/A')}",
         f"- 配置比较报告：{compare.get('report_path', 'N/A')}",
+        f"- 基本面估值报告：{valuation.get('report_path', 'N/A')}",
+        f"- 加减仓规则报告：{decision.get('report_path', 'N/A')}",
         "",
         "## 使用边界",
         "",
@@ -92,6 +120,8 @@ def _write_summary(payload: dict[str, Any], output_dir: str | Path) -> tuple[Pat
         "- 数据验收 BLOCKED 时不会继续计算风险与配置；WARNING 会保留告警并继续生成研究结果。",
         "- 未提供现金时，当前持仓比例仅按导入证券计算；不会声称现金余额为零或代表已核实的全部资产。",
         "- 未导入有日期的 DRAM/QQQ ETF 持仓快照时，ETF 穿透会标记缺失或不完整，不会用固定比例代替真实持仓。",
+        "- DCF 和远期 PE 是估值交叉检查，不是目标价；财报单位、周期性现金流或报价不合格时必须保留 BLOCKED/低置信度。",
+        "- 加仓研究观察需要经过核实的现金余额；现金未提供时不会生成加仓金额。减仓复核也不是自动卖出指令。",
         "- 风险、压力情景和优化结果用于研究复核，不构成买卖指令；程序不会连接券商或下单。",
         "",
     ]
@@ -112,7 +142,15 @@ def run_portfolio_suite(
     subgroup_caps_path: str | Path = risk_analysis.DEFAULT_SUBGROUP_CAPS,
     stress_profile_path: str | Path = risk_analysis.DEFAULT_STRESS_PROFILE,
     allocation_profiles_path: str | Path = allocation.DEFAULT_PROFILES,
+    valuation_config_path: str | Path = valuation_pipeline.DEFAULT_CONFIG,
+    valuation_cache_dir: str | Path = valuation_pipeline.DEFAULT_CACHE_DIR,
+    valuation_output_dir: str | Path = DEFAULT_VALUATION_OUTPUT,
+    decision_policy_path: str | Path = decision_rules.DEFAULT_POLICY,
+    decision_output_dir: str | Path = DEFAULT_DECISION_OUTPUT,
     output_dir: str | Path = DEFAULT_OUTPUT,
+    valuation_max_cache_age_hours: float = 168.0,
+    valuation_max_quote_age_days: int = 7,
+    valuation_max_financial_age_days: int = 180,
     refresh: bool = True,
     cash: float | None = None,
     snapshot_paths: Sequence[str | Path] = (),
@@ -124,7 +162,7 @@ def run_portfolio_suite(
             cash_value = float(cash)
         except (TypeError, ValueError) as exc:
             raise ValueError("cash must be a finite non-negative USD amount.") from exc
-        if cash_value < 0:
+        if not math.isfinite(cash_value) or cash_value < 0:
             raise ValueError("cash must be a finite non-negative USD amount.")
     else:
         cash_value = None
@@ -158,11 +196,15 @@ def run_portfolio_suite(
         },
         "risk_analysis": {"status": "SKIPPED"},
         "allocation_comparison": {"status": "SKIPPED"},
+        "valuation_research": {"status": "SKIPPED"},
+        "position_decision_review": {"status": "SKIPPED"},
     }
 
     if acceptance_status == "BLOCKED":
         stages["risk_analysis"]["reason"] = "数据验收为 BLOCKED，禁止继续解释风险指标。"
         stages["allocation_comparison"]["reason"] = "数据验收为 BLOCKED，禁止继续生成配置方案。"
+        stages["valuation_research"]["reason"] = "数据验收为 BLOCKED，禁止刷新或解释基本面估值。"
+        stages["position_decision_review"]["reason"] = "数据验收为 BLOCKED，禁止输出加减仓规则结论。"
         payload: dict[str, Any] = {
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
             "status": "BLOCKED",
@@ -242,13 +284,96 @@ def run_portfolio_suite(
     except (ValueError, OSError, RuntimeError, KeyError) as exc:
         stages["allocation_comparison"] = {"status": "FAILED", "error": f"{type(exc).__name__}: {exc}"}
 
+    valuation_rows: list[dict[str, Any]] | None = None
+    try:
+        universe = data_pipeline.load_universe(config_path)
+        valuation_config = valuation_pipeline.load_config(valuation_config_path)
+        operating_companies = [
+            ticker for ticker in universe["holding_tickers"]
+            if universe["symbols"][ticker].get("instrument_type") != "etf"
+        ]
+        missing_valuation_config = sorted(set(operating_companies) - set(valuation_config["tickers"]))
+        if missing_valuation_config:
+            raise ValueError(
+                "Valuation assumptions are missing for held operating companies: "
+                f"{missing_valuation_config}."
+            )
+        valuation_rows = valuation_pipeline.run(
+            operating_companies,
+            config_path=Path(valuation_config_path),
+            cache_dir=Path(valuation_cache_dir),
+            output_dir=Path(valuation_output_dir),
+            refresh=refresh,
+            allow_stale_cache=False,
+            max_cache_age_hours=valuation_max_cache_age_hours,
+            max_quote_age_days=valuation_max_quote_age_days,
+            max_financial_age_days=valuation_max_financial_age_days,
+        )
+        if not valuation_rows:
+            raise RuntimeError("Valuation pipeline returned no rows.")
+        validation_status_counts: dict[str, int] = {}
+        blocked_valuation_tickers: list[str] = []
+        for row in valuation_rows:
+            status = str(row.get("data_validation_status", "BLOCKED")).upper()
+            validation_status_counts[status] = validation_status_counts.get(status, 0) + 1
+            if status != "PASS":
+                blocked_valuation_tickers.append(str(row.get("ticker", "UNKNOWN")))
+        valuation_status = "WARNING" if blocked_valuation_tickers else "PASS"
+        stages["valuation_research"] = {
+            "status": valuation_status,
+            "ticker_count": len(valuation_rows),
+            "validation_status_counts": validation_status_counts,
+            "non_pass_tickers": blocked_valuation_tickers,
+            "report_path": str(Path(valuation_output_dir) / "valuation_report.md"),
+            "summary_path": str(Path(valuation_output_dir) / "valuation_summary.csv"),
+        }
+        if blocked_valuation_tickers:
+            warnings.append(
+                "以下经营性公司估值数据未达到 PASS，规则引擎会将相关标的保留为观察/数据阻断，不会推断可加仓："
+                + ", ".join(blocked_valuation_tickers)
+            )
+    except (ValueError, OSError, RuntimeError, KeyError) as exc:
+        stages["valuation_research"] = {"status": "FAILED", "error": f"{type(exc).__name__}: {exc}"}
+
+    if stages["valuation_research"]["status"] in {"PASS", "WARNING"}:
+        try:
+            _, decision_summary = decision_rules.run_position_decision_review(
+                config_path=config_path,
+                holdings_path=holdings_path,
+                prices_path=close_prices_path,
+                valuation_path=Path(valuation_output_dir) / "valuation_summary.csv",
+                policy_path=decision_policy_path,
+                output_dir=decision_output_dir,
+                cash=cash_value,
+                as_of_date=as_of_date,
+            )
+            decision_counts = dict(decision_summary.get("decision_counts", {}))
+            stages["position_decision_review"] = {
+                "status": "COMPLETED",
+                "position_count": decision_summary.get("position_count"),
+                "decision_counts": decision_counts,
+                "cash_source": decision_summary.get("cash_source"),
+                "report_path": decision_summary.get("report_path"),
+            }
+            if cash_value is None:
+                warnings.append("现金余额未提供；加仓规则会标记现金未核实，不会计算可用加仓金额。")
+            if int(decision_counts.get("REDUCE_REVIEW", 0)) > 0:
+                warnings.append("规则复核发现达到减仓/再平衡复核门槛的持仓；请阅读逐项依据，不代表要求立即卖出。")
+        except (ValueError, OSError, RuntimeError, KeyError) as exc:
+            stages["position_decision_review"] = {"status": "FAILED", "error": f"{type(exc).__name__}: {exc}"}
+    else:
+        stages["position_decision_review"] = {
+            "status": "SKIPPED",
+            "reason": "估值刷新失败；为防止误用旧估值文件，本次跳过加减仓规则复核。",
+        }
+
     failed_count = sum(
         stages[key]["status"] == "FAILED"
-        for key in ("risk_analysis", "allocation_comparison")
+        for key in ("risk_analysis", "allocation_comparison", "valuation_research", "position_decision_review")
     )
     completed_count = sum(
-        stages[key]["status"] == "PASS"
-        for key in ("risk_analysis", "allocation_comparison")
+        stages[key]["status"] in {"PASS", "WARNING", "COMPLETED"}
+        for key in ("risk_analysis", "allocation_comparison", "valuation_research", "position_decision_review")
     )
     if failed_count and completed_count:
         overall_status = "PARTIAL"
@@ -296,6 +421,14 @@ def main() -> None:
     parser.add_argument("--subgroup-caps", type=Path, default=risk_analysis.DEFAULT_SUBGROUP_CAPS)
     parser.add_argument("--stress-profile", type=Path, default=risk_analysis.DEFAULT_STRESS_PROFILE)
     parser.add_argument("--allocation-profiles", type=Path, default=allocation.DEFAULT_PROFILES)
+    parser.add_argument("--valuation-config", type=Path, default=valuation_pipeline.DEFAULT_CONFIG)
+    parser.add_argument("--valuation-cache-dir", type=Path, default=valuation_pipeline.DEFAULT_CACHE_DIR)
+    parser.add_argument("--valuation-output-dir", type=Path, default=DEFAULT_VALUATION_OUTPUT)
+    parser.add_argument("--decision-policy", type=Path, default=decision_rules.DEFAULT_POLICY)
+    parser.add_argument("--decision-output-dir", type=Path, default=DEFAULT_DECISION_OUTPUT)
+    parser.add_argument("--valuation-max-cache-age-hours", type=float, default=168.0)
+    parser.add_argument("--valuation-max-quote-age-days", type=int, default=7)
+    parser.add_argument("--valuation-max-financial-age-days", type=int, default=180)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--cash", type=float, default=None, help="Optional verified cash balance in USD.")
     parser.add_argument(
@@ -324,6 +457,14 @@ def main() -> None:
             subgroup_caps_path=args.subgroup_caps,
             stress_profile_path=args.stress_profile,
             allocation_profiles_path=args.allocation_profiles,
+            valuation_config_path=args.valuation_config,
+            valuation_cache_dir=args.valuation_cache_dir,
+            valuation_output_dir=args.valuation_output_dir,
+            decision_policy_path=args.decision_policy,
+            decision_output_dir=args.decision_output_dir,
+            valuation_max_cache_age_hours=args.valuation_max_cache_age_hours,
+            valuation_max_quote_age_days=args.valuation_max_quote_age_days,
+            valuation_max_financial_age_days=args.valuation_max_financial_age_days,
             output_dir=args.output_dir,
             refresh=args.refresh,
             cash=args.cash,
