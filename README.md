@@ -737,3 +737,32 @@ python phase1_risk_analysis.py --tickers SPY,SOXX,NVDA,GOOGL,MU,SKHY,DRAM
 
 如需与券商汇总值对账，可在 holdings_snapshot.csv.meta.json 中本地保存 reported_market_value、reported_unrealized_pnl 和可选 reconciliation_tolerance。该文件同样属于私人数据，勿提交到 Git。只有提供了券商汇总值，验收器才会进行对应对账；没有汇总值会显示警告，而不会误报为已完成对账。
 
+
+
+## 个人真实组合：一键行情更新与本地验收
+
+项目附带 `config/portfolio_universe.json`，其中只保存研究标的清单、计价币种和风险分类，不保存个人持仓数量或成本。默认研究范围是九项持仓，加上 `SPY`（市场基准）和 `SOXX`（半导体行业参照）。
+
+1. 将个人持仓 CSV 放入 `data/private/holdings_snapshot.csv`。该文件至少需要 `ticker, shares, average_cost, snapshot_price, currency, risk_group, subgroup` 字段。`snapshot_price` 仅为兼容现有导入格式的备用快照；一旦读取到未调整价格面板，组合市值会使用面板中的最新有效 `Close` 重估。
+2. 安装依赖：`python -m pip install -r requirements.txt`。
+3. 在 Codespaces 终端执行：`python run_personal_portfolio.py --refresh`。
+4. 阅读 `outputs/acceptance/real_data_acceptance.md`。`BLOCKED` 表示不能进入正式风险分析；`WARNING` 表示数据可读但有需披露的限制。行情缓存位于 `data/raw/`，个人持仓位于 `data/private/`，二者都被 Git 忽略。
+
+可使用 `python run_personal_portfolio.py --use-cache` 复用未过期且覆盖范围完整的缓存；如果缓存不满足要求，脚本会重新下载。数据更新使用 yfinance/Yahoo Finance，适合研究和学习，不是审计级行情服务。此命令只发送标的代码请求行情，不会上传持股数量、成本、账户余额或私有 CSV。
+
+### 共同历史长度说明
+
+`SKHY` 是 2026-07-13 开始常规交易的 Nasdaq ADR（1 份 ADR 代表 10 股韩国普通股）。因此，九项持仓的共同收益历史会被它的上市时间限制；本项目的最低验收门槛为 60 个共同日收益观测，126 个观测作为更理想的研究参考。未达到 126 时，报告必须保留“历史较短”的限制，不得将韩国本股的 KRW 价格直接拼接为 SKHY 的 USD 价格序列。
+
+### ETF 穿透
+
+`etf_lookthrough.py` 接受带明确 as-of 日期的 ETF 完整持仓 CSV，合并直接股票、TRS/掉期和 ADR 对发行人的敞口。DRAM 的持仓会随时间变化，因此应从 [Roundhill 官方 DRAM 页面](https://www.roundhillinvestments.com/etf/dram/)取得对应日期的完整持仓，再导入：
+
+\`\`\`bash
+python etf_lookthrough.py \\
+  --holdings-csv data/private/DRAM_holdings.csv \\
+  --as-of YYYY-MM-DD \\
+  --source-name "Roundhill official holdings"
+\`\`\`
+
+导入后先检查未映射权重、现金权重和完整度，再用于组合穿透；不要将 ETF 里的 MU/SKHY 敞口与直接持仓简单重复相加。
