@@ -77,7 +77,7 @@ def test_warning_acceptance_runs_risk_and_allocation_and_preserves_unknown_cash(
                 "portfolio_return_observations": 80,
                 "alert_count": 3,
                 "lookthrough_status": "partial_or_missing_or_stale",
-                "lookthrough_funds_missing": ["DRAM", "QQQ"],
+                "lookthrough_funds_missing": [],
             }
         }
 
@@ -96,11 +96,12 @@ def test_warning_acceptance_runs_risk_and_allocation_and_preserves_unknown_cash(
         }
 
     universe = {
-        "holding_tickers": ["AAA", "BBB", "ETF"],
+        "holding_tickers": ["AAA", "BBB", "DRAM", "QQQ"],
         "symbols": {
             "AAA": {"instrument_type": "equity"},
             "BBB": {"instrument_type": "equity"},
-            "ETF": {"instrument_type": "etf"},
+            "DRAM": {"instrument_type": "etf"},
+            "QQQ": {"instrument_type": "etf"},
         },
     }
     monkeypatch.setattr(app.data_pipeline, "load_universe", lambda path: universe)
@@ -130,8 +131,17 @@ def test_warning_acceptance_runs_risk_and_allocation_and_preserves_unknown_cash(
     monkeypatch.setattr(app.valuation_pipeline, "run", fake_valuation)
     monkeypatch.setattr(app.decision_rules, "run_position_decision_review", fake_decision)
 
+    etf_dir = tmp_path / "etfs"
+    dram_snapshot = _write_dated_etf_snapshot(
+        etf_dir / "DRAM_lookthrough_2026-10-30.json", "DRAM", "2026-10-30"
+    )
+    qqq_snapshot = _write_dated_etf_snapshot(
+        etf_dir / "QQQ_lookthrough_2026-10-31.json", "QQQ", "2026-10-31"
+    )
+
     result = app.run_portfolio_suite(
         output_dir=tmp_path,
+        etf_snapshot_dir=etf_dir,
         valuation_output_dir=tmp_path / "valuation",
         decision_output_dir=tmp_path / "decisions",
         refresh=False,
@@ -148,7 +158,10 @@ def test_warning_acceptance_runs_risk_and_allocation_and_preserves_unknown_cash(
     assert calls["allocation"]["cash"] is None
     assert calls["risk"]["as_of_date"] == "2026-11-02"
     assert calls["allocation"]["as_of_date"] == "2026-11-02"
-    assert calls["risk"]["snapshot_paths"] == []
+    assert calls["risk"]["snapshot_paths"] == [dram_snapshot, qqq_snapshot]
+    assert result["stages"]["risk_analysis"]["etf_snapshot_files"] == [
+        str(dram_snapshot), str(qqq_snapshot)
+    ]
     assert calls["valuation"]["symbols"] == ["AAA", "BBB"]
     assert calls["valuation"]["refresh"] is False
     assert calls["valuation"]["output_dir"] == tmp_path / "valuation"
@@ -265,6 +278,7 @@ def _write_dated_etf_snapshot(
         "issuer_weights_pct": issuer_weights or {"MU": 20.0},
         "warnings": [],
     }
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
 
@@ -309,23 +323,17 @@ def test_discover_etf_snapshots_rejects_duplicate_latest_date(tmp_path: Path) ->
         )
 
 
-def test_explicit_etf_snapshot_paths_override_auto_discovery(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    explicit = tmp_path / "explicit_dram.json"
-    _write_dated_etf_snapshot(explicit, "DRAM", "2026-10-30")
-    auto = tmp_path / "auto"
+
+def test_explicit_etf_snapshot_paths_override_auto_discovery(tmp_path: Path) -> None:
+    explicit = _write_dated_etf_snapshot(
+        tmp_path / "explicit.json", "DRAM", "2026-10-30"
+    )
+    auto_dir = tmp_path / "auto"
     _write_dated_etf_snapshot(
-        auto / "DRAM_lookthrough_2026-10-29.json", "DRAM", "2026-10-29"
+        auto_dir / "DRAM_lookthrough_2026-10-29.json", "DRAM", "2026-10-29"
     )
-    monkeypatch.setattr(app.data_pipeline, "run_pipeline", lambda **kwargs: {
-        "status": "BLOCKED", "as_of_date": "2026-11-02",
-    })
-    result = app.run_portfolio_suite(
-        output_dir=tmp_path / "suite",
-        snapshot_paths=[explicit],
-        etf_snapshot_dir=auto,
+
+    result = app.resolve_etf_snapshot_paths(
+        [explicit], auto_dir, fund_tickers=("DRAM",), as_of_date="2026-11-02"
     )
-    assert result["stages"]["risk_analysis"]["status"] == "SKIPPED"
-    # BLOCKED acceptance intentionally stops before reading any snapshot.
+    assert result == [explicit]
