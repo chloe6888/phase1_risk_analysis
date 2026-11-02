@@ -51,7 +51,7 @@ def _currency_diagnostic(path: Path) -> list[str]:
 
 
 def _explicit_currency_issue(path: Path) -> str | None:
-    """Do not let known non-USD exchange suffixes inherit the USD default."""
+    """Require a declared quote currency and verify common exchange suffixes."""
     try:
         frame = pd.read_csv(path)
     except Exception:
@@ -59,6 +59,11 @@ def _explicit_currency_issue(path: Path) -> str | None:
     frame.columns = [str(column).strip().lower() for column in frame.columns]
     if "ticker" not in frame:
         return None
+    if "currency" not in frame.columns:
+        return (
+            "持仓 CSV 缺少 currency 列；请逐行明确填写证券报价币种（如 USD、HKD、KRW），"
+            "不要依赖导入器将缺省币种设为 USD。"
+        )
     expected_by_suffix = {
         ".HK": "HKD",
         ".KS": "KRW",
@@ -71,22 +76,16 @@ def _explicit_currency_issue(path: Path) -> str | None:
         ".SZ": "CNY",
         ".TW": "TWD",
     }
-    has_currency = "currency" in frame.columns
     for row in frame.to_dict(orient="records"):
         ticker = str(row.get("ticker") or "").strip().upper()
         expected = next(
             (currency for suffix, currency in expected_by_suffix.items() if ticker.endswith(suffix)),
             None,
         )
-        if expected is None:
-            continue
-        supplied = str(row.get("currency") or "").strip().upper() if has_currency else ""
+        supplied = str(row.get("currency") or "").strip().upper()
         if not supplied:
-            return (
-                f"{ticker} 属于非美元市场代码，但未明确填写 currency；"
-                f"请按证券报价币种填写 {expected}，不要沿用默认 USD。"
-            )
-        if supplied != expected:
+            return f"{ticker or '某一持仓'} 的 currency 为空；请填写该证券实际报价币种。"
+        if expected is not None and supplied != expected:
             return f"{ticker} 的代码后缀对应 {expected}，但文件填写为 {supplied}；请先核对报价币种。"
     return None
 

@@ -206,3 +206,24 @@ def test_stale_adjusted_price_for_one_holding_is_blocked(tmp_path: Path) -> None
 
     assert result["status"] == "BLOCKED"
     assert any(item["code"] == "ADJUSTED_PRICE_TICKER_STALE" for item in result["checks"])
+
+
+def test_currency_column_is_required_even_for_unambiguous_us_ticker(tmp_path: Path) -> None:
+    holdings = tmp_path / "holdings.csv"
+    close = tmp_path / "close.csv"
+    adjusted = tmp_path / "adjusted.csv"
+    pd.DataFrame({
+        "ticker": ["GOOGL"],
+        "shares": [1],
+        "average_cost": [100],
+        "snapshot_price": [110],
+    }).to_csv(holdings, index=False)
+    _write_prices(close, ["GOOGL"])
+    _write_prices(adjusted, ["GOOGL"])
+
+    result = acceptance.run_acceptance(
+        holdings, close, adjusted, tmp_path / "reports", as_of_date="2026-02-10"
+    )
+
+    assert result["status"] == "BLOCKED"
+    assert any(item["code"] == "EXCHANGE_CURRENCY_UNVERIFIED" for item in result["checks"])
