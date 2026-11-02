@@ -266,10 +266,21 @@ def test_run_valuation_writes_report_and_manifest_without_network(
     )
 
     assert rows[0]["ticker"] == "TEST"
+    assert rows[0]["data_validation_status"] == "PASS"
+    assert rows[0]["data_validation_dcf_ready"] is True
+    assert rows[0]["data_validation_pe_ready"] is True
+    quality = pd.read_csv(tmp_path / "outputs" / "valuation_data_quality.csv")
+    assert quality.iloc[0]["data_validation_status"] == "PASS"
+    validation_summary = json.loads(
+        (tmp_path / "outputs" / "valuation_validation_summary.json").read_text()
+    )
+    assert validation_summary["tickers"][0]["status"] == "PASS"
     for name in (
         "valuation_summary.csv",
         "valuation_fundamentals.json",
         "valuation_assumptions_used.json",
+        "valuation_data_quality.csv",
+        "valuation_validation_summary.json",
         "valuation_report.md",
         "valuation_run_manifest.json",
     ):
