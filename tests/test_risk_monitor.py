@@ -108,3 +108,47 @@ def test_risk_monitor_cli_writes_snapshot_and_alerts(tmp_path: Path) -> None:
         assert (output_dir / filename).exists()
         assert (output_dir / filename).stat().st_size > 0
     assert "alert_count" in result.stdout
+
+
+def test_risk_monitor_flags_subgroup_concentration_and_reports_risk_contributions() -> None:
+    close = synthetic_prices()
+    holdings = pd.DataFrame({
+        "ticker": ["AAA", "BBB"],
+        "shares": [80, 20],
+        "risk_group": ["semiconductor_related", "semiconductor_related"],
+        "subgroup": ["memory", "memory"],
+    })
+    positions, alerts, summary = app.analyze_risk_snapshot(
+        holdings,
+        close,
+        adjusted_prices=close,
+        single_name_limit=1.0,
+        subgroup_max_weights={"memory": 0.5},
+        volatility_limit_annual=1.0,
+        drawdown_limit=1.0,
+        max_data_age_calendar_days=None,
+    )
+    assert "subgroup_concentration" in set(alerts["kind"])
+    assert summary["subgroup_exposures"]["memory"] == pytest.approx(1.0)
+    assert positions["risk_contribution_pct"].notna().all()
+    assert positions["risk_contribution_pct"].sum() == pytest.approx(100.0, abs=1e-6)
+    assert summary["risk_contribution_sum_pct"] == pytest.approx(100.0, abs=1e-6)
+
+
+def test_risk_monitor_warns_when_common_history_is_short() -> None:
+    close = synthetic_prices(80)
+    holdings = pd.DataFrame({
+        "ticker": ["AAA", "BBB"],
+        "shares": [1, 1],
+        "subgroup": ["growth", "defensive"],
+    })
+    _, alerts, summary = app.analyze_risk_snapshot(
+        holdings,
+        close,
+        volatility_limit_annual=1.0,
+        drawdown_limit=1.0,
+        single_name_limit=1.0,
+        max_data_age_calendar_days=None,
+    )
+    assert summary["portfolio_return_observations"] == 79
+    assert "short_history_for_risk_estimates" in set(alerts["kind"])
