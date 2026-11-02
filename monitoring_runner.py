@@ -145,7 +145,7 @@ def _append_event_history(
     with path.open("a", encoding="utf-8") as handle:
         for event in events:
             record = {"snapshot_id": snapshot_id, **event}
-            handle.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\\n")
+            handle.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
         handle.flush()
         os.fsync(handle.fileno())
 
