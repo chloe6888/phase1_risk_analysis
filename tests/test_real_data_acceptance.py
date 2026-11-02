@@ -227,3 +227,51 @@ def test_currency_column_is_required_even_for_unambiguous_us_ticker(tmp_path: Pa
 
     assert result["status"] == "BLOCKED"
     assert any(item["code"] == "EXCHANGE_CURRENCY_UNVERIFIED" for item in result["checks"])
+
+
+def test_blank_currency_cell_is_blocked_instead_of_defaulting_to_usd(tmp_path: Path) -> None:
+    holdings = tmp_path / "holdings.csv"
+    close = tmp_path / "close.csv"
+    adjusted = tmp_path / "adjusted.csv"
+    pd.DataFrame({
+        "ticker": ["GOOGL"],
+        "shares": [1],
+        "average_cost": [100],
+        "snapshot_price": [110],
+        "currency": [None],
+    }).to_csv(holdings, index=False)
+    _write_prices(close, ["GOOGL"])
+    _write_prices(adjusted, ["GOOGL"])
+
+    result = acceptance.run_acceptance(
+        holdings, close, adjusted, tmp_path / "reports", as_of_date="2026-02-10"
+    )
+
+    assert result["status"] == "BLOCKED"
+    check = next(item for item in result["checks"] if item["code"] == "EXCHANGE_CURRENCY_UNVERIFIED")
+    assert check["level"] == "BLOCKER"
+    assert "currency 为空" in check["message"]
+
+
+def test_non_iso_currency_label_is_blocked(tmp_path: Path) -> None:
+    holdings = tmp_path / "holdings.csv"
+    close = tmp_path / "close.csv"
+    adjusted = tmp_path / "adjusted.csv"
+    pd.DataFrame({
+        "ticker": ["GOOGL"],
+        "shares": [1],
+        "average_cost": [100],
+        "snapshot_price": [110],
+        "currency": ["US Dollars"],
+    }).to_csv(holdings, index=False)
+    _write_prices(close, ["GOOGL"])
+    _write_prices(adjusted, ["GOOGL"])
+
+    result = acceptance.run_acceptance(
+        holdings, close, adjusted, tmp_path / "reports", as_of_date="2026-02-10"
+    )
+
+    assert result["status"] == "BLOCKED"
+    check = next(item for item in result["checks"] if item["code"] == "EXCHANGE_CURRENCY_UNVERIFIED")
+    assert check["level"] == "BLOCKER"
+    assert "三位字母币种代码" in check["message"]
