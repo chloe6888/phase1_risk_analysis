@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Editable starter valuation assumptions. These are analyst-configured scenarios, not market consensus or company guidance. Review each ticker and update after each earnings release.",
+  "description": "Editable starter valuation assumptions for the seven operating-company holdings. These are analyst-configured scenarios, not market consensus or company guidance. DRAM and QQQ are ETFs and deliberately excluded from company DCF/PE; use dated issuer look-through instead. Review each ticker after every earnings release.",
   "default_settings": {
     "margin_of_safety": 0.25,
     "overvaluation_premium": 0.2,
@@ -34,33 +34,6 @@
       "per_share_basis_verified": true,
       "per_share_basis_note": "美国市场普通股上市证券；EPS 与股数按该上市证券单位使用，仍需与公司/供应商披露交叉核验。"
     },
-    "NVDA": {
-      "cyclical": false,
-      "assumption_source": "初始研究假设（人工设定，非市场一致预期）",
-      "notes": "关注数据中心增长、毛利率、客户资本开支、出口限制和产品迭代；高增长假设必须由订单、收入和利润率支持。",
-      "scenarios": {
-        "bear": {
-          "fcf_growth": 0.05,
-          "terminal_growth": 0.02,
-          "fair_pe": 18,
-          "cost_of_equity": 0.105
-        },
-        "base": {
-          "fcf_growth": 0.12,
-          "terminal_growth": 0.025,
-          "fair_pe": 23,
-          "cost_of_equity": 0.1
-        },
-        "bull": {
-          "fcf_growth": 0.2,
-          "terminal_growth": 0.03,
-          "fair_pe": 28,
-          "cost_of_equity": 0.095
-        }
-      },
-      "per_share_basis_verified": true,
-      "per_share_basis_note": "美国市场普通股上市证券；EPS 与股数按该上市证券单位使用，仍需与公司/供应商披露交叉核验。"
-    },
     "MU": {
       "cyclical": true,
       "assumption_source": "周期股初始研究假设（人工设定，非市场一致预期）",
@@ -86,7 +59,9 @@
         }
       },
       "per_share_basis_verified": true,
-      "per_share_basis_note": "美国市场普通股上市证券；EPS 与股数按该上市证券单位使用，仍需与公司/供应商披露交叉核验。"
+      "per_share_basis_note": "美国市场普通股上市证券；EPS 与股数按该上市证券单位使用，仍需与公司/供应商披露交叉核验。",
+      "normalized_fcf": null,
+      "normalized_fcf_currency": null
     },
     "SKHY": {
       "cyclical": true,
@@ -114,7 +89,140 @@
       },
       "per_share_basis_verified": false,
       "per_share_basis_note": "SK hynix NASDAQ ADR：1 ADS 对应 10 股韩国普通股。Yahoo 的 forward EPS 和 sharesOutstanding 是否都以 1 ADS 为单位尚未完成核验；在确认前禁止计算每 ADS 的 DCF/PE。核验后再将 per_share_basis_verified 设为 true。",
-      "adr_underlying_shares_per_ads": 10
+      "adr_underlying_shares_per_ads": 10,
+      "normalized_fcf": null,
+      "normalized_fcf_currency": null
+    },
+    "AVGO": {
+      "cyclical": true,
+      "assumption_source": "初始研究假设（人工设定，非市场一致预期；需结合半导体周期与软件业务拆分复核）",
+      "notes": "Broadcom 同时包含半导体解决方案与基础设施软件业务。重点跟踪 AI 网络/定制加速器需求、VMware 整合、自由现金流和客户集中度。当前参数仅为敏感性分析起点，未拆分两类业务估值。",
+      "normalized_fcf": null,
+      "normalized_fcf_currency": null,
+      "per_share_basis_verified": true,
+      "per_share_basis_note": "NASDAQ 普通股报价单位；仍需与最新公司稀释股数、拆股及供应商数据口径交叉核验。",
+      "scenarios": {
+        "bear": {
+          "fcf_growth": 0.03,
+          "terminal_growth": 0.02,
+          "fair_pe": 18,
+          "cost_of_equity": 0.11
+        },
+        "base": {
+          "fcf_growth": 0.08,
+          "terminal_growth": 0.025,
+          "fair_pe": 22,
+          "cost_of_equity": 0.1
+        },
+        "bull": {
+          "fcf_growth": 0.13,
+          "terminal_growth": 0.03,
+          "fair_pe": 26,
+          "cost_of_equity": 0.095
+        }
+      }
+    },
+    "LRCX": {
+      "cyclical": true,
+      "assumption_source": "初始研究假设（人工设定，非市场一致预期；强周期半导体设备商）",
+      "notes": "关注晶圆厂资本开支、先进封装、存储/逻辑客户支出、服务收入和订单周期。优先用跨周期正常化 FCF/EPS；单年 FCF DCF 仅作敏感性参考。",
+      "normalized_fcf": null,
+      "normalized_fcf_currency": null,
+      "per_share_basis_verified": true,
+      "per_share_basis_note": "NASDAQ 普通股报价单位；核验公司最新拆股调整、稀释股数与供应商口径。",
+      "scenarios": {
+        "bear": {
+          "fcf_growth": -0.02,
+          "terminal_growth": 0.015,
+          "fair_pe": 16,
+          "cost_of_equity": 0.12
+        },
+        "base": {
+          "fcf_growth": 0.06,
+          "terminal_growth": 0.02,
+          "fair_pe": 21,
+          "cost_of_equity": 0.105
+        },
+        "bull": {
+          "fcf_growth": 0.11,
+          "terminal_growth": 0.025,
+          "fair_pe": 25,
+          "cost_of_equity": 0.1
+        }
+      }
+    },
+    "MRVL": {
+      "cyclical": true,
+      "assumption_source": "初始研究假设（人工设定，非市场一致预期；需验证数据中心/网络业务兑现）",
+      "notes": "关注数据中心网络、定制芯片、光互连、企业网络的收入结构、毛利率、客户集中度和现金流转化。增长参数不等于公司指引。",
+      "normalized_fcf": null,
+      "normalized_fcf_currency": null,
+      "per_share_basis_verified": true,
+      "per_share_basis_note": "NASDAQ 普通股报价单位；核验最新稀释股数和公司披露口径。",
+      "scenarios": {
+        "bear": {
+          "fcf_growth": -0.03,
+          "terminal_growth": 0.015,
+          "fair_pe": 16,
+          "cost_of_equity": 0.125
+        },
+        "base": {
+          "fcf_growth": 0.07,
+          "terminal_growth": 0.02,
+          "fair_pe": 22,
+          "cost_of_equity": 0.11
+        },
+        "bull": {
+          "fcf_growth": 0.14,
+          "terminal_growth": 0.025,
+          "fair_pe": 28,
+          "cost_of_equity": 0.1
+        }
+      }
+    },
+    "OKTA": {
+      "cyclical": false,
+      "assumption_source": "初始研究假设（人工设定，非市场一致预期；重点核对 GAAP 盈利与股票薪酬）",
+      "notes": "关注身份安全订阅收入、净留存率、剩余履约义务、GAAP 营业利润、股票薪酬和自由现金流。若供应商 forward EPS 缺失或非正，PE 自动禁用。",
+      "normalized_fcf": null,
+      "normalized_fcf_currency": null,
+      "per_share_basis_verified": true,
+      "per_share_basis_note": "NASDAQ 普通股报价单位；核验最新稀释股数和股票薪酬影响。",
+      "scenarios": {
+        "bear": {
+          "fcf_growth": 0.02,
+          "terminal_growth": 0.02,
+          "fair_pe": 18,
+          "cost_of_equity": 0.115
+        },
+        "base": {
+          "fcf_growth": 0.08,
+          "terminal_growth": 0.025,
+          "fair_pe": 24,
+          "cost_of_equity": 0.105
+        },
+        "bull": {
+          "fcf_growth": 0.14,
+          "terminal_growth": 0.03,
+          "fair_pe": 30,
+          "cost_of_equity": 0.1
+        }
+      }
+    }
+  },
+  "included_scope": {
+    "operating_company_holdings": [
+      "AVGO",
+      "GOOG",
+      "LRCX",
+      "MRVL",
+      "MU",
+      "OKTA",
+      "SKHY"
+    ],
+    "excluded_etfs": {
+      "DRAM": "ETF; analyze using dated fund holdings and underlying issuer look-through, not company DCF/PE.",
+      "QQQ": "ETF; analyze using dated fund holdings and underlying issuer look-through, not company DCF/PE."
     }
   }
 }
