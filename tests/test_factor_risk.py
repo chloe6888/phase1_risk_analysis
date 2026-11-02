@@ -45,9 +45,7 @@ def test_factor_regression_recovers_known_exposures_and_variance_accounting() ->
     assert betas["BOND"] == pytest.approx(-0.30, abs=0.08)
     assert summary["r_squared"] > 0.90
     assert summary["factor_variance_share_sum"] + summary["residual_variance_share"] == pytest.approx(1.0, abs=1e-7)
-    assert table.loc[table["factor"] == "BOND", "interpretation"].iloc[0] in {
-        "risk_offset", "near_zero_contribution"
-    }
+    assert table.loc[table["factor"] == "BOND", "interpretation"].iloc[0] == "positive_risk_contribution"
     assert len(aligned) == len(factors)
 
 
@@ -99,6 +97,7 @@ def test_weighted_portfolio_returns_use_cash_as_zero_return_and_reject_bad_weigh
     expected = prices.pct_change(fill_method=None).dropna().mul(
         pd.Series({"AAA": 0.6, "BBB": 0.2}), axis=1
     ).sum(axis=1)
+    expected.index.name = "Date"
     pd.testing.assert_series_equal(returns, expected.rename("portfolio_return"))
     assert summary["cash_weight"] == pytest.approx(0.2)
     with pytest.raises(ValueError, match="no more than 100"):

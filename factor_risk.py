@@ -167,16 +167,16 @@ def estimate_factor_risk(
         raise ValueError("At least one factor column is required.")
 
     combined = pd.concat([y, factors], axis=1, join="inner").dropna(how="any")
-    if len(combined) < max(minimum_observations, factors.shape[1] + 3):
-        raise ValueError(
-            f"Only {len(combined)} aligned observations are available; "
-            f"at least {max(minimum_observations, factors.shape[1] + 3)} are required."
-        )
     values = combined.to_numpy(dtype=float)
     if not np.isfinite(values).all():
         raise ValueError("Portfolio and factor returns must be finite.")
     if (values < -1.0).any():
         raise ValueError("Simple returns cannot be lower than -100%.")
+    if len(combined) < max(minimum_observations, factors.shape[1] + 3):
+        raise ValueError(
+            f"Only {len(combined)} aligned observations are available; "
+            f"at least {max(minimum_observations, factors.shape[1] + 3)} are required."
+        )
 
     y_values = combined["portfolio_return"].to_numpy(dtype=float)
     factor_names = list(factors.columns)
