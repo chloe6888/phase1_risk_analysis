@@ -59,6 +59,10 @@ def _normalise_holdings(holdings: pd.DataFrame) -> pd.DataFrame:
         frame["risk_group"] = UNGROUPED
     frame["risk_group"] = frame["risk_group"].fillna(UNGROUPED).astype(str).str.strip()
     frame.loc[frame["risk_group"].eq(""), "risk_group"] = UNGROUPED
+    if "subgroup" not in frame.columns:
+        frame["subgroup"] = UNGROUPED
+    frame["subgroup"] = frame["subgroup"].fillna(UNGROUPED).astype(str).str.strip()
+    frame.loc[frame["subgroup"].eq(""), "subgroup"] = UNGROUPED
     return frame.loc[frame["shares"] > 0].reset_index(drop=True)
 
 
@@ -70,6 +74,7 @@ def analyze_risk_snapshot(
     cash: float = 0.0,
     groups: Mapping[str, str] | None = None,
     group_max_weights: Mapping[str, float] | None = None,
+    subgroup_max_weights: Mapping[str, float] | None = None,
     single_name_limit: float = 0.15,
     volatility_limit_annual: float = 0.40,
     drawdown_limit: float = 0.25,
@@ -125,6 +130,14 @@ def analyze_risk_snapshot(
     if unknown_groups:
         raise ValueError(f"Group caps reference unknown holdings groups: {unknown_groups}")
 
+    subgroup_caps = {str(k): float(v) for k, v in dict(subgroup_max_weights or {}).items()}
+    if any(not math.isfinite(v) or not 0 <= v <= 1 for v in subgroup_caps.values()):
+        raise ValueError("Every subgroup cap must be finite and between 0 and 1.")
+    known_subgroups = set(positions["subgroup"].astype(str))
+    unknown_subgroups = sorted(set(subgroup_caps) - known_subgroups)
+    if unknown_subgroups:
+        raise ValueError(f"Subgroup caps reference unknown holdings subgroups: {unknown_subgroups}")
+
     latest_prices: dict[str, float] = {}
     latest_dates: dict[str, str] = {}
     for ticker in tickers:
@@ -142,12 +155,31 @@ def analyze_risk_snapshot(
     positions["portfolio_weight"] = positions["market_value"] / net_equity
     group_series = positions.groupby("risk_group")["portfolio_weight"].sum().sort_values(ascending=False)
     group_exposure_map = {str(k): float(v) for k, v in group_series.items()}
+    subgroup_series = positions.groupby("subgroup")["portfolio_weight"].sum().sort_values(ascending=False)
+    subgroup_exposure_map = {str(k): float(v) for k, v in subgroup_series.items()}
 
     history = adjusted[tickers].dropna(how="any")
     shares = positions.set_index("ticker")["shares"].reindex(tickers)
     historical_equity = history.mul(shares, axis=1).sum(axis=1) + cash
     historical_equity = historical_equity[historical_equity > 0]
     daily_returns = historical_equity.pct_change().dropna()
+
+    # Static current-weight covariance contribution. This is a one-period
+    # risk decomposition, not historical account P/L attribution.
+    asset_returns = history.pct_change(fill_method=None).dropna(how="any")
+    positions["risk_contribution_pct"] = np.nan
+    if len(asset_returns) >= 2:
+        covariance = asset_returns.cov().to_numpy(dtype=float)
+        current_weights = (
+            positions.set_index("ticker")["portfolio_weight"]
+            .reindex(tickers).to_numpy(dtype=float)
+        )
+        portfolio_variance = float(current_weights @ covariance @ current_weights)
+        if math.isfinite(portfolio_variance) and portfolio_variance > 1e-16:
+            contribution = current_weights * (covariance @ current_weights) / portfolio_variance
+            contribution_map = dict(zip(tickers, contribution * 100.0))
+            positions["risk_contribution_pct"] = positions["ticker"].map(contribution_map)
+
     if daily_returns.empty:
         max_drawdown = None
         annualized_volatility = None
@@ -185,6 +217,28 @@ def analyze_risk_snapshot(
                 "ticker": None, "group": group, "observed": exposure, "limit": limit,
                 "message": f"Group {group} weight {exposure:.1%} exceeds the {limit:.1%} group limit.",
             })
+    for subgroup, exposure in subgroup_exposure_map.items():
+        limit = subgroup_caps.get(subgroup)
+        if limit is not None and exposure > limit + 1e-9:
+            alerts.append({
+                "level": "warning", "kind": "subgroup_concentration",
+                "ticker": None, "group": subgroup, "observed": exposure, "limit": limit,
+                "message": f"Subgroup {subgroup} weight {exposure:.1%} exceeds the {limit:.1%} subgroup limit.",
+            })
+    if len(daily_returns) < 126:
+        alerts.append({
+            "level": "warning", "kind": "short_history_for_risk_estimates",
+            "ticker": None, "group": None, "observed": int(len(daily_returns)),
+            "limit": 126,
+            "message": f"Only {len(daily_returns)} common daily returns are available; volatility, drawdown and tail-risk estimates are preliminary.",
+        })
+    elif len(daily_returns) < 252:
+        alerts.append({
+            "level": "info", "kind": "history_under_one_year",
+            "ticker": None, "group": None, "observed": int(len(daily_returns)),
+            "limit": 252,
+            "message": f"Only {len(daily_returns)} common daily returns are available; estimates cover less than roughly one trading year.",
+        })
     if annualized_volatility is not None and annualized_volatility > volatility_limit_annual:
         alerts.append({
             "level": "warning", "kind": "portfolio_volatility",
@@ -241,12 +295,19 @@ def analyze_risk_snapshot(
         "single_name_limit": float(single_name_limit),
         "group_max_weights": group_caps,
         "group_exposures": group_exposure_map,
+        "subgroup_max_weights": subgroup_caps,
+        "subgroup_exposures": subgroup_exposure_map,
+        "risk_contribution_sum_pct": (
+            float(positions["risk_contribution_pct"].sum())
+            if positions["risk_contribution_pct"].notna().all() else None
+        ),
         "alert_count": int(len(alerts)),
         "methodology": {
             "market_value": "shares multiplied by each holding's latest available unadjusted close",
             "historical_risk_path": "today's share quantities applied to adjusted historical prices; cash held constant",
             "volatility": f"sample standard deviation of the latest {volatility_window} daily portfolio-proxy returns, annualized by sqrt(252)",
             "var_cvar": "historical one-period 95% loss-tail estimates; not maximum-loss limits",
+            "risk_contribution": "current portfolio weights multiplied by historical daily-return covariance; a static one-period risk decomposition, not historical P/L attribution",
             "no_broker_connection": True,
         },
         "limitations": [
@@ -283,6 +344,7 @@ def main() -> None:
     parser.add_argument("--cash", type=float, default=0.0)
     parser.add_argument("--single-name-limit", type=float, default=0.15)
     parser.add_argument("--group-caps-json", type=Path)
+    parser.add_argument("--subgroup-caps-json", type=Path)
     parser.add_argument("--groups-json", type=Path)
     parser.add_argument("--volatility-limit", type=float, default=0.40)
     parser.add_argument("--drawdown-limit", type=float, default=0.25)
@@ -296,10 +358,12 @@ def main() -> None:
     adjusted_prices = load_price_panel(args.adjusted_prices)
     group_map = _load_json_mapping(args.groups_json, "groups")
     group_caps = _load_json_mapping(args.group_caps_json, "group caps")
+    subgroup_caps = _load_json_mapping(args.subgroup_caps_json, "subgroup caps")
     positions, alerts, summary = analyze_risk_snapshot(
         holdings, close_prices, adjusted_prices=adjusted_prices, cash=args.cash,
         groups={str(k): str(v) for k, v in group_map.items()},
         group_max_weights={str(k): float(v) for k, v in group_caps.items()},
+        subgroup_max_weights={str(k): float(v) for k, v in subgroup_caps.items()},
         single_name_limit=args.single_name_limit,
         volatility_limit_annual=args.volatility_limit,
         drawdown_limit=args.drawdown_limit,
