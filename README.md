@@ -766,6 +766,12 @@ python run_personal_portfolio_suite.py --refresh \
 - outputs/personal_risk/personal_portfolio_risk_report.md：集中度、波动/回撤、风险贡献、相关性、压力测试及 ETF 穿透；
 - outputs/allocation_comparison/personal_allocation_comparison.md：当前持仓与平衡/保守/最小方差参考配置比较和 walk-forward 结果。
 
+该入口现在还会在风险和配置比较之后刷新七家已持有经营性公司的 DCF/远期 PE 场景估值，并在估值结果文件成功更新后运行加减仓规则复核。DRAM、QQQ 是 ETF，不进入公司估值；SKHY 若 ADR 每股财务单位未核验，仍会在估值/规则报告中保持阻断或低置信度。若估值刷新整体失败，会跳过决策复核，避免误用上一次遗留的估值文件。
+
+新增输出：
+- `outputs/valuation/valuation_report.md`：经营性公司 DCF、远期 PE、数据质量与假设核验；
+- `outputs/position_decisions/position_decision_review.md`：每项持仓的加仓观察/持有/减仓复核规则和依据。
+
 该入口只在本地运行，不上传私人持仓；不会连接券商或下单。WARNING 状态下的最小方差权重只供研究，不能直接视为建议买入或卖出的目标。
 
 
