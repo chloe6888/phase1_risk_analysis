@@ -85,7 +85,10 @@ def _current_market_values(
 ) -> tuple[dict[str, float], pd.DataFrame, dict[str, Any]]:
     if cash is not None and (not math.isfinite(float(cash)) or float(cash) < 0):
         raise ValueError("cash must be finite and non-negative.")
-    reference_date = date.today() if as_of_date is None else date.fromisoformat(str(as_of_date))
+    try:
+        reference_date = date.today() if as_of_date is None else pd.Timestamp(as_of_date).date()
+    except (TypeError, ValueError) as exc:
+        raise ValueError("as_of_date must be a valid date.") from exc
     prices = close_prices.copy()
     prices.index = pd.to_datetime(prices.index, errors="coerce")
     if prices.index.hasnans or prices.index.has_duplicates:
