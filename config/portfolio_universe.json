@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "base_currency": "USD",
+  "benchmark": "SPY",
+  "reference_tickers": [
+    "SPY",
+    "SOXX"
+  ],
+  "start_date": "2015-01-01",
+  "minimum_common_observations": 60,
+  "target_common_observations": 126,
+  "symbols": {
+    "AVGO": {
+      "name": "Broadcom",
+      "role": "holding",
+      "currency": "USD",
+      "risk_group": "semiconductor_related",
+      "subgroup": "networking_custom_silicon"
+    },
+    "GOOG": {
+      "name": "Alphabet Class C",
+      "role": "holding",
+      "currency": "USD",
+      "risk_group": "internet_platform",
+      "subgroup": "search_cloud_ai"
+    },
+    "DRAM": {
+      "name": "Roundhill Memory ETF",
+      "role": "holding",
+      "currency": "USD",
+      "risk_group": "semiconductor_related",
+      "subgroup": "memory"
+    },
+    "LRCX": {
+      "name": "Lam Research",
+      "role": "holding",
+      "currency": "USD",
+      "risk_group": "semiconductor_related",
+      "subgroup": "semiconductor_equipment"
+    },
+    "MRVL": {
+      "name": "Marvell Technology",
+      "role": "holding",
+      "currency": "USD",
+      "risk_group": "semiconductor_related",
+      "subgroup": "networking_custom_silicon"
+    },
+    "MU": {
+      "name": "Micron Technology",
+      "role": "holding",
+      "currency": "USD",
+      "risk_group": "semiconductor_related",
+      "subgroup": "memory"
+    },
+    "OKTA": {
+      "name": "Okta",
+      "role": "holding",
+      "currency": "USD",
+      "risk_group": "enterprise_security",
+      "subgroup": "identity_security_software"
+    },
+    "QQQ": {
+      "name": "Invesco QQQ Trust",
+      "role": "holding",
+      "currency": "USD",
+      "risk_group": "broad_tech_etf",
+      "subgroup": "nasdaq_100"
+    },
+    "SKHY": {
+      "name": "SK hynix Nasdaq ADR",
+      "role": "holding",
+      "currency": "USD",
+      "risk_group": "semiconductor_related",
+      "subgroup": "memory",
+      "regular_way_start_date": "2026-07-13",
+      "adr_ratio": "1 ADR represents 10 Korean ordinary shares"
+    },
+    "SPY": {
+      "name": "SPDR S&P 500 ETF Trust",
+      "role": "benchmark",
+      "currency": "USD"
+    },
+    "SOXX": {
+      "name": "iShares Semiconductor ETF",
+      "role": "sector_reference",
+      "currency": "USD"
+    }
+  },
+  "notes": [
+    "Portfolio security list and risk taxonomy only; personal share quantities and cost basis must remain in data/private/holdings_snapshot.csv.",
+    "SKHY has a short Nasdaq regular-way history beginning 2026-07-13. Do not splice KRW ordinary-share prices directly into the USD ADR price history.",
+    "ETF exposures require dated issuer holdings; the DRAM issuer look-through importer does not assume a fixed constituent mix."
+  ]
+}
