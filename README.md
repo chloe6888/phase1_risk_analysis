@@ -428,6 +428,8 @@ python monitoring_runner.py \
   --holdings-csv data/private/holdings_snapshot.csv \
   --prices data/raw/close_price_panel.csv \
   --adjusted-prices data/raw/adjusted_close_panel.csv \
+  --group-caps-json risk_profiles/balanced_group_caps.json \
+  --subgroup-caps-json risk_profiles/balanced_subgroup_caps.json \
   --cash 5000 \
   --mode daily
 ```
