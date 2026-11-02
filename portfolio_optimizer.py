@@ -119,6 +119,157 @@ def _project_group_capped_budget(
     return result
 
 
+def _project_hierarchical_capped_budget(
+    values: np.ndarray,
+    *,
+    asset_caps: np.ndarray,
+    group_indices: Mapping[str, np.ndarray],
+    group_caps: Mapping[str, float],
+    subgroup_indices: Mapping[str, np.ndarray],
+    subgroup_caps: Mapping[str, float],
+    budget: float,
+    iterations: int = 40,
+) -> np.ndarray:
+    """Project onto a long-only budget with asset, parent-group and child caps.
+
+    Parent groups and subgroups must each partition the assets, with every
+    subgroup wholly contained in exactly one parent group. The nested
+    water-filling projection is solved by bisection at child, parent and
+    portfolio levels.
+    """
+    vector = np.asarray(values, dtype=float)
+    caps = np.asarray(asset_caps, dtype=float)
+    if vector.ndim != 1 or caps.shape != vector.shape:
+        raise ValueError("Projection values and asset caps must be one-dimensional and aligned.")
+    if not np.isfinite(vector).all() or not np.isfinite(caps).all() or (caps < 0).any():
+        raise ValueError("Projection values must be finite and caps finite/non-negative.")
+    if not math.isfinite(budget) or not 0 < budget <= 1:
+        raise ValueError("budget must be finite and in (0, 1].")
+    if iterations < 1:
+        raise ValueError("iterations must be positive.")
+
+    group_specs: list[tuple[str, np.ndarray, float, list[tuple[str, np.ndarray, float]]]] = []
+    total_capacity = 0.0
+    grouped_asset_indices = np.concatenate(
+        [np.asarray(indices, dtype=int) for indices in group_indices.values()]
+    ) if group_indices else np.asarray([], dtype=int)
+    subgroup_asset_indices = np.concatenate(
+        [np.asarray(indices, dtype=int) for indices in subgroup_indices.values()]
+    ) if subgroup_indices else np.asarray([], dtype=int)
+    expected = np.arange(len(vector), dtype=int)
+    if not np.array_equal(np.sort(grouped_asset_indices), expected):
+        raise ValueError("Parent groups must partition every asset exactly once.")
+    if not np.array_equal(np.sort(subgroup_asset_indices), expected):
+        raise ValueError("Subgroups must partition every asset exactly once.")
+
+    for group, raw_group_idx in group_indices.items():
+        group_idx = np.asarray(raw_group_idx, dtype=int)
+        child_specs: list[tuple[str, np.ndarray, float]] = []
+        child_coverage: list[int] = []
+        child_capacity = 0.0
+        for subgroup, raw_sub_idx in subgroup_indices.items():
+            sub_idx = np.asarray(raw_sub_idx, dtype=int)
+            intersection = sub_idx[np.isin(sub_idx, group_idx)]
+            if intersection.size == 0:
+                continue
+            if intersection.size != sub_idx.size:
+                raise ValueError(
+                    f"Subgroup '{subgroup}' spans more than one parent group; hierarchy is invalid."
+                )
+            local_indices = np.searchsorted(group_idx, intersection)
+            if not np.array_equal(group_idx[local_indices], intersection):
+                raise ValueError("Subgroup indices are not aligned with their parent group.")
+            available = float(caps[intersection].sum())
+            child_limit = float(subgroup_caps.get(subgroup, available))
+            if not math.isfinite(child_limit) or child_limit < 0 or child_limit > 1:
+                raise ValueError(f"Subgroup cap for '{subgroup}' must be between 0 and 1.")
+            child_limit = min(child_limit, available)
+            child_capacity += child_limit
+            child_coverage.extend(intersection.tolist())
+            child_specs.append((subgroup, local_indices, child_limit))
+        if sorted(child_coverage) != sorted(group_idx.tolist()):
+            raise ValueError(f"Subgroups do not fully cover parent group '{group}'.")
+        available_group = float(child_capacity)
+        group_limit = float(group_caps.get(group, available_group))
+        if not math.isfinite(group_limit) or group_limit < 0 or group_limit > 1:
+            raise ValueError(f"Group cap for '{group}' must be between 0 and 1.")
+        group_limit = min(group_limit, available_group)
+        total_capacity += group_limit
+        group_specs.append((group, group_idx, group_limit, child_specs))
+
+    if total_capacity + 1e-10 < budget:
+        raise ValueError(
+            f"Constraints are infeasible: maximum allowed risky weight is {total_capacity:.6f}, "
+            f"below requested budget {budget:.6f}."
+        )
+
+    def project_child(values_child: np.ndarray, caps_child: np.ndarray, limit: float) -> np.ndarray:
+        natural = np.clip(values_child, 0.0, caps_child)
+        if float(natural.sum()) <= limit + 1e-12:
+            return natural
+        low = 0.0
+        high = max(1.0, float(np.max(values_child)) + 1.0)
+        for _ in range(iterations):
+            middle = (low + high) / 2.0
+            candidate = np.clip(values_child - middle, 0.0, caps_child)
+            if float(candidate.sum()) > limit:
+                low = middle
+            else:
+                high = middle
+        return np.clip(values_child - high, 0.0, caps_child)
+
+    def project_group(group_values: np.ndarray, group_asset_caps: np.ndarray,
+                      child_specs: list[tuple[str, np.ndarray, float]],
+                      group_limit: float) -> np.ndarray:
+        def project_children(shift: float) -> np.ndarray:
+            shifted = group_values - shift
+            result = np.zeros_like(shifted)
+            for _, local_idx, child_limit in child_specs:
+                result[local_idx] = project_child(
+                    shifted[local_idx], group_asset_caps[local_idx], child_limit
+                )
+            return result
+
+        natural = project_children(0.0)
+        if float(natural.sum()) <= group_limit + 1e-12:
+            return natural
+        low = 0.0
+        high = max(1.0, float(np.max(group_values)) + 1.0)
+        for _ in range(iterations):
+            middle = (low + high) / 2.0
+            candidate = project_children(middle)
+            if float(candidate.sum()) > group_limit:
+                low = middle
+            else:
+                high = middle
+        return project_children(high)
+
+    def project_at(total_shift: float) -> np.ndarray:
+        projected = np.zeros_like(vector)
+        for _, group_idx, group_limit, child_specs in group_specs:
+            projected[group_idx] = project_group(
+                vector[group_idx] - total_shift,
+                caps[group_idx],
+                child_specs,
+                group_limit,
+            )
+        return projected
+
+    low = float(np.min(vector - caps)) - 1.0
+    high = float(np.max(vector)) + 1.0
+    for _ in range(iterations):
+        middle = (low + high) / 2.0
+        candidate = project_at(middle)
+        if float(candidate.sum()) > budget:
+            low = middle
+        else:
+            high = middle
+    result = project_at((low + high) / 2.0)
+    if abs(float(result.sum()) - budget) > 1e-7:
+        raise RuntimeError("Hierarchical capped-simplex projection did not satisfy the risky-budget equality.")
+    return result
+
+
 def _validate_constraints(
     tickers: list[str],
     *,
@@ -212,6 +363,8 @@ def optimize_portfolio(
     asset_max_weights: Mapping[str, float] | None = None,
     groups: Mapping[str, str] | None = None,
     group_max_weights: Mapping[str, float] | None = None,
+    subgroups: Mapping[str, str] | None = None,
+    subgroup_max_weights: Mapping[str, float] | None = None,
     objective: str = "minimum_variance",
     return_weight: float = 0.0,
     periods_per_year: int = TRADING_DAYS_PER_YEAR,
@@ -264,6 +417,40 @@ def optimize_portfolio(
         risky_budget=risky_budget,
     )
 
+    use_hierarchical_caps = subgroups is not None or subgroup_max_weights is not None
+    if subgroup_max_weights is not None and subgroups is None:
+        raise ValueError("subgroups mapping is required when subgroup_max_weights are supplied.")
+    supplied_subgroups = dict(subgroups or {})
+    unknown_subgroup_assets = sorted(set(supplied_subgroups) - set(tickers))
+    if unknown_subgroup_assets:
+        raise ValueError(f"Subgroup mapping references unknown tickers: {unknown_subgroup_assets}")
+    subgroup_by_ticker: dict[str, str] = {}
+    for ticker in tickers:
+        name = str(supplied_subgroups.get(ticker, group_by_ticker[ticker])).strip()
+        if not name:
+            raise ValueError(f"Subgroup name for {ticker} must not be empty.")
+        subgroup_by_ticker[ticker] = name
+    subgroup_caps = {str(k): float(v) for k, v in dict(subgroup_max_weights or {}).items()}
+    if any(not math.isfinite(v) or not 0 <= v <= 1 for v in subgroup_caps.values()):
+        raise ValueError("Every subgroup cap must be finite and between 0 and 1.")
+    known_subgroups = set(subgroup_by_ticker.values())
+    unknown_subgroups = sorted(set(subgroup_caps) - known_subgroups)
+    if unknown_subgroups:
+        raise ValueError(f"Subgroup caps reference unknown subgroups: {unknown_subgroups}")
+    subgroup_members: dict[str, list[int]] = {}
+    parent_by_subgroup: dict[str, str] = {}
+    for position, ticker in enumerate(tickers):
+        subgroup = subgroup_by_ticker[ticker]
+        parent = group_by_ticker[ticker]
+        if subgroup in parent_by_subgroup and parent_by_subgroup[subgroup] != parent:
+            raise ValueError(f"Subgroup '{subgroup}' spans multiple parent groups.")
+        parent_by_subgroup[subgroup] = parent
+        subgroup_members.setdefault(subgroup, []).append(position)
+    subgroup_indices = {
+        name: np.asarray(indices, dtype=int)
+        for name, indices in subgroup_members.items()
+    }
+
     covariance = daily_returns.cov().to_numpy(dtype=float) * periods_per_year
     covariance = (covariance + covariance.T) / 2.0
     if not np.isfinite(covariance).all():
@@ -276,6 +463,16 @@ def optimize_portfolio(
     expected_returns = daily_returns.mean().to_numpy(dtype=float) * periods_per_year
 
     def project(values: np.ndarray) -> np.ndarray:
+        if use_hierarchical_caps:
+            return _project_hierarchical_capped_budget(
+                values,
+                asset_caps=caps,
+                group_indices=group_indices,
+                group_caps=group_caps,
+                subgroup_indices=subgroup_indices,
+                subgroup_caps=subgroup_caps,
+                budget=risky_budget,
+            )
         return _project_group_capped_budget(
             values,
             asset_caps=caps,
@@ -355,10 +552,15 @@ def optimize_portfolio(
     output = pd.DataFrame({
         "ticker": tickers,
         "group": [group_by_ticker[ticker] for ticker in tickers],
+        "subgroup": [subgroup_by_ticker[ticker] for ticker in tickers],
         "weight": weights,
         "asset_max_weight": caps,
         "group_max_weight": [
             group_caps.get(group_by_ticker[ticker], float(caps[group_indices[group_by_ticker[ticker]]].sum()))
+            for ticker in tickers
+        ],
+        "subgroup_max_weight": [
+            subgroup_caps.get(subgroup_by_ticker[ticker], float(caps[subgroup_indices[subgroup_by_ticker[ticker]]].sum()))
             for ticker in tickers
         ],
         "historical_expected_return_annualized": expected_returns,
@@ -371,6 +573,10 @@ def optimize_portfolio(
         group: float(sum(weights[i] for i in indices))
         for group, indices in group_indices.items()
     }
+    subgroup_exposures = {
+        subgroup: float(sum(weights[i] for i in indices))
+        for subgroup, indices in subgroup_indices.items()
+    }
     summary: dict[str, object] = {
         "objective": objective,
         "return_weight": float(return_weight),
@@ -382,6 +588,8 @@ def optimize_portfolio(
         "tickers": tickers,
         "group_exposures": group_exposures,
         "group_max_weights": group_caps,
+        "subgroup_exposures": subgroup_exposures,
+        "subgroup_max_weights": subgroup_caps,
         "convergence": {
             "converged": converged,
             "iterations": iteration_count,
@@ -398,7 +606,12 @@ def optimize_portfolio(
             "returns": "common complete-case daily adjusted-close simple returns",
             "covariance": "sample covariance annualized by periods_per_year",
             "expected_returns": "historical arithmetic mean annualized; used only for mean_variance objective",
-            "constraints": "long-only, per-asset upper bounds, disjoint group upper bounds, fixed risky budget; residual is cash",
+            "constraints": (
+                "long-only, per-asset upper bounds, parent-group upper bounds, nested subgroup upper bounds, "
+                "fixed risky budget; residual is cash"
+                if use_hierarchical_caps else
+                "long-only, per-asset upper bounds, disjoint group upper bounds, fixed risky budget; residual is cash"
+            ),
             "execution": "no trading orders or transaction costs are simulated by the optimizer",
         },
         "limitations": [
@@ -432,8 +645,10 @@ def main() -> None:
     parser.add_argument("--risky-budget", type=float, default=0.95, help="Total risky allocation; residual is cash.")
     parser.add_argument("--asset-max-weight", type=float, default=0.35, help="Default maximum weight per asset.")
     parser.add_argument("--asset-caps-json", type=Path, help="Optional JSON object: ticker -> max weight.")
-    parser.add_argument("--groups-json", type=Path, help="Optional JSON object: ticker -> group name.")
-    parser.add_argument("--group-caps-json", type=Path, help="Optional JSON object: group name -> max weight.")
+    parser.add_argument("--groups-json", type=Path, help="Optional JSON object: ticker -> parent group name.")
+    parser.add_argument("--group-caps-json", type=Path, help="Optional JSON object: parent group name -> max weight.")
+    parser.add_argument("--subgroups-json", type=Path, help="Optional JSON object: ticker -> subgroup name.")
+    parser.add_argument("--subgroup-caps-json", type=Path, help="Optional JSON object: subgroup name -> max weight.")
     parser.add_argument("--objective", choices=["minimum_variance", "mean_variance"], default="minimum_variance")
     parser.add_argument("--return-weight", type=float, default=0.0, help="Expected-return weight for mean_variance only.")
     parser.add_argument("--minimum-observations", type=int, default=60)
@@ -444,6 +659,8 @@ def main() -> None:
     asset_caps = _load_json_mapping(args.asset_caps_json, "asset caps")
     groups = _load_json_mapping(args.groups_json, "groups")
     group_caps = _load_json_mapping(args.group_caps_json, "group caps")
+    subgroups = _load_json_mapping(args.subgroups_json, "subgroups")
+    subgroup_caps = _load_json_mapping(args.subgroup_caps_json, "subgroup caps")
     weights, summary = optimize_portfolio(
         prices,
         risky_budget=args.risky_budget,
@@ -451,6 +668,8 @@ def main() -> None:
         asset_max_weights={str(k): float(v) for k, v in asset_caps.items()},
         groups={str(k): str(v) for k, v in groups.items()},
         group_max_weights={str(k): float(v) for k, v in group_caps.items()},
+        subgroups={str(k): str(v) for k, v in subgroups.items()} if args.subgroups_json else None,
+        subgroup_max_weights={str(k): float(v) for k, v in subgroup_caps.items()} if args.subgroup_caps_json else None,
         objective=args.objective,
         return_weight=args.return_weight,
         minimum_observations=args.minimum_observations,
