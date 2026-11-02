@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -80,6 +81,87 @@ def read_csv(path: str | Path, *, date_index: bool = False) -> pd.DataFrame | No
     else:
         frame = pd.read_csv(source)
     return frame
+
+
+
+
+LOCAL_TOOL_SCRIPTS = {
+    "portfolio_optimizer.py",
+    "factor_risk.py",
+    "paper_trading.py",
+    "risk_monitor.py",
+}
+
+
+def persist_private_upload(
+    uploaded: Any,
+    filename: str,
+    *,
+    private_root: str | Path | None = None,
+) -> Path | None:
+    """Persist a user-uploaded tool input under the git-ignored private data folder."""
+    if uploaded is None:
+        return None
+    if Path(filename).name != filename or filename in {"", ".", ".."}:
+        raise ValueError("Upload filename must be a simple file name.")
+    root = Path(private_root) if private_root is not None else ROOT / "data" / "private" / "tool_inputs"
+    destination = root / filename
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    temporary.write_bytes(uploaded.getvalue())
+    temporary.replace(destination)
+    return destination
+
+
+def run_local_tool(script_name: str, args: list[str], *, timeout_seconds: int = 900) -> tuple[bool, str]:
+    """Run an allow-listed local research CLI without shell interpolation."""
+    if script_name not in LOCAL_TOOL_SCRIPTS:
+        raise ValueError(f"Unsupported local tool: {script_name}")
+    script_path = ROOT / script_name
+    if not script_path.is_file():
+        return False, f"工具脚本不存在：{script_path}"
+    command = [sys.executable, str(script_path), *[str(item) for item in args]]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return False, f"任务超过 {timeout_seconds} 秒，已停止等待。\n{exc.stderr or ''}"
+    except OSError as exc:
+        return False, f"无法启动研究工具：{type(exc).__name__}: {exc}"
+    output = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part)
+    if result.returncode != 0:
+        return False, output or f"{script_name} 退出码：{result.returncode}"
+    return True, output or "运行成功。"
+
+
+def parse_json_object_text(value: str, label: str) -> dict[str, Any]:
+    if not value.strip():
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{label} 不是有效 JSON：{exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{label} 必须是 JSON 对象。")
+    return parsed
+
+
+def write_private_json(value: dict[str, Any], filename: str) -> Path:
+    destination = ROOT / "data" / "private" / "tool_inputs" / filename
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    temporary.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(destination)
+    return destination
 
 
 def output_status(output_dir: str | Path | None = None) -> dict[str, bool]:
@@ -969,8 +1051,8 @@ def main() -> None:
         except Exception as exc:
             st.error(f"本地持仓文件无法解析：{exc}")
 
-    overview_tab, decision_tab, risk_tab, backtest_tab, validation_tab, memory_tab, valuation_tab, files_tab = st.tabs(
-        ["账户概览", "投资决策复核", "组合风险", "策略回测", "稳健性检验", "存储主题", "个股估值", "研究报告与文件"]
+    overview_tab, decision_tab, risk_tab, backtest_tab, validation_tab, memory_tab, valuation_tab, tools_tab, files_tab = st.tabs(
+        ["账户概览", "投资决策复核", "组合风险", "策略回测", "稳健性检验", "存储主题", "个股估值", "研究工具箱", "研究报告与文件"]
     )
 
     with overview_tab:
@@ -1437,6 +1519,384 @@ def main() -> None:
         if memory is None:
             st.info("导入包含 MU、SKHY 或 DRAM 的持仓，并运行完整研究流程后，这里才会显示存储主题分析。")
         st.warning("目标仓位和风险上限是可修改的研究假设，不是自动买卖指令。交易前仍需核对公司基本面、估值、ETF 最新持仓和账户净资产。")
+
+    with tools_tab:
+        st.subheader("研究工具箱")
+        st.caption("这些工具复用已验证的本地研究模块。优化、因子分析和风险监控只生成研究结果；纸面交易默认预览，只有显式勾选提交模拟账本才会更新本地模拟账户。")
+        optimizer_tab, factor_tab, paper_tab, monitor_tab = st.tabs(
+            ["约束组合优化", "因子风险分解", "纸面交易", "风险监控"]
+        )
+
+        optimizer_output = OUTPUT_DIR / "tools" / "portfolio_optimizer"
+        factor_output = OUTPUT_DIR / "tools" / "factor_risk"
+        paper_output = OUTPUT_DIR / "tools" / "paper_trading"
+        monitor_output = OUTPUT_DIR / "tools" / "risk_monitor"
+
+        with optimizer_tab:
+            st.markdown("### 根据历史风险和仓位上限计算目标权重")
+            optimizer_prices = ROOT / "data" / "raw" / "adjusted_close_panel.csv"
+            if not optimizer_prices.is_file():
+                st.warning("尚无调整收盘价面板。请先在研究入口运行一次完整研究流程。")
+            with st.form("portfolio_optimizer_form"):
+                opt_a, opt_b = st.columns(2)
+                with opt_a:
+                    risky_budget = st.number_input(
+                        "风险资产预算", min_value=0.10, max_value=1.00,
+                        value=0.90, step=0.05, format="%.2f",
+                        help="剩余比例作为现金，不会被强行投入股票。",
+                    )
+                    asset_cap = st.number_input(
+                        "单一资产最大占比", min_value=0.05, max_value=1.00,
+                        value=0.35, step=0.05, format="%.2f",
+                    )
+                with opt_b:
+                    optimizer_objective = st.selectbox(
+                        "优化目标",
+                        options=["minimum_variance", "mean_variance"],
+                        format_func=lambda value: "历史最小方差" if value == "minimum_variance" else "均值—方差（使用历史均值）",
+                    )
+                    return_weight = st.number_input(
+                        "历史收益权重（仅均值—方差）",
+                        min_value=0.0, max_value=10.0, value=0.0, step=0.01,
+                        help="历史收益估计噪声较大；最小方差模式不使用此参数。",
+                    )
+                opt_asset_caps = st.text_area(
+                    "单股上限 JSON（可选）",
+                    value="{}",
+                    help='例如 {"MU":0.15,"SKHY":0.10,"DRAM":0.20}',
+                )
+                opt_groups = st.text_area(
+                    "股票所属风险主题 JSON（可选，每只股票只属于一个组）",
+                    value="{}",
+                    help='例如 {"MU":"memory","SKHY":"memory","DRAM":"memory","GOOG":"technology"}',
+                )
+                opt_group_caps = st.text_area(
+                    "风险主题上限 JSON（可选）",
+                    value="{}",
+                    help='例如 {"memory":0.25,"technology":0.35}',
+                )
+                run_optimizer = st.form_submit_button("运行组合优化", type="primary")
+            if run_optimizer:
+                try:
+                    asset_caps = parse_json_object_text(opt_asset_caps, "单股上限")
+                    groups = parse_json_object_text(opt_groups, "股票分组")
+                    group_caps = parse_json_object_text(opt_group_caps, "分组上限")
+                    args = [
+                        "--prices", str(optimizer_prices),
+                        "--risky-budget", str(float(risky_budget)),
+                        "--asset-max-weight", str(float(asset_cap)),
+                        "--objective", optimizer_objective,
+                        "--return-weight", str(float(return_weight)),
+                        "--output-dir", str(optimizer_output),
+                    ]
+                    for value, filename, flag in (
+                        (asset_caps, "optimizer_asset_caps.json", "--asset-caps-json"),
+                        (groups, "optimizer_groups.json", "--groups-json"),
+                        (group_caps, "optimizer_group_caps.json", "--group-caps-json"),
+                    ):
+                        if value:
+                            args += [flag, str(write_private_json(value, filename))]
+                    with st.spinner("正在求解约束组合权重……"):
+                        ok, output = run_local_tool("portfolio_optimizer.py", args)
+                    if ok:
+                        st.success("组合优化完成。结果仅供研究，不会自动调仓。")
+                    else:
+                        st.error("组合优化失败。请检查约束是否可行、价格历史是否足够。")
+                    if output:
+                        with st.expander("查看运行信息"):
+                            st.code(output[-8000:])
+                except Exception as exc:
+                    st.error(f"组合优化输入有误：{type(exc).__name__}: {exc}")
+            opt_weights = read_csv(optimizer_output / "portfolio_optimized_weights.csv")
+            opt_summary = read_json(optimizer_output / "portfolio_optimization_summary.json")
+            if opt_summary:
+                cols = st.columns(4)
+                cols[0].metric("历史年化波动率", _pct(opt_summary.get("optimized_portfolio", {}).get("volatility_annualized")))
+                cols[1].metric("约束等权波动率", _pct(opt_summary.get("constrained_equal_weight_baseline", {}).get("volatility_annualized")))
+                cols[2].metric("风险资产预算", _pct(opt_summary.get("risky_budget")))
+                cols[3].metric("现金比例", _pct(opt_summary.get("cash_weight")))
+            if opt_weights is not None:
+                st.markdown("### 优化权重与风险贡献")
+                st.dataframe(_display_frame(opt_weights), hide_index=True, use_container_width=True)
+                st.caption(f"目标权重文件：{optimizer_output / 'portfolio_optimized_weights.csv'}")
+            if opt_summary is None:
+                st.info("还没有组合优化结果。请确认已生成调整收盘价面板，并提交一次优化任务。")
+
+        with factor_tab:
+            st.markdown("### 分解组合对市场和行业代理因子的历史暴露")
+            st.caption("上传因子 ETF 的调整收盘价 CSV（含日期列），并选择权重文件。支持使用上方优化器的最新权重。")
+            factor_asset_prices = ROOT / "data" / "raw" / "adjusted_close_panel.csv"
+            factor_upload = st.file_uploader(
+                "因子代理价格面板 CSV",
+                type=["csv"],
+                key="factor_proxy_price_upload",
+                help="例如包含 SPY、SOXX、QQQ、IWM、TLT、GLD 等列的调整收盘价面板。",
+            )
+            use_optimizer_weights = st.checkbox(
+                "使用最新组合优化权重",
+                value=(optimizer_output / "portfolio_optimized_weights.csv").is_file(),
+                key="factor_use_optimizer_weights",
+            )
+            weight_upload = None
+            if not use_optimizer_weights:
+                weight_upload = st.file_uploader(
+                    "组合权重 CSV（ticker,weight）",
+                    type=["csv"],
+                    key="factor_weight_upload",
+                )
+            factor_min_obs = st.number_input(
+                "最少共同收益观测数", min_value=20, max_value=2000,
+                value=60, step=10, key="factor_minimum_observations",
+            )
+            if st.button("运行因子风险分解", type="primary", key="run_factor_risk"):
+                try:
+                    if not factor_asset_prices.is_file():
+                        raise ValueError("缺少组合资产调整收盘价面板，请先运行完整研究流程。")
+                    if factor_upload is None:
+                        raise ValueError("请上传因子代理价格面板 CSV。")
+                    factor_path = persist_private_upload(factor_upload, "factor_proxy_prices.csv")
+                    if use_optimizer_weights:
+                        weights_path = optimizer_output / "portfolio_optimized_weights.csv"
+                        if not weights_path.is_file():
+                            raise ValueError("尚无优化器权重文件，请先运行组合优化或上传权重 CSV。")
+                    else:
+                        if weight_upload is None:
+                            raise ValueError("请上传组合权重 CSV。")
+                        weights_path = persist_private_upload(weight_upload, "factor_portfolio_weights.csv")
+                    args = [
+                        "--asset-prices", str(factor_asset_prices),
+                        "--factor-prices", str(factor_path),
+                        "--weights-csv", str(weights_path),
+                        "--minimum-observations", str(int(factor_min_obs)),
+                        "--output-dir", str(factor_output),
+                    ]
+                    with st.spinner("正在对齐收益并进行因子回归……"):
+                        ok, output = run_local_tool("factor_risk.py", args)
+                    if ok:
+                        st.success("因子风险分解完成。请同时查看因子共线性警告和残差风险。")
+                    else:
+                        st.error("因子风险分解失败。请检查输入价格列、日期和组合权重。")
+                    if output:
+                        with st.expander("查看运行信息"):
+                            st.code(output[-8000:])
+                except Exception as exc:
+                    st.error(f"因子分析输入有误：{type(exc).__name__}: {exc}")
+            factor_summary = read_json(factor_output / "portfolio_factor_summary.json")
+            factor_exposures = read_csv(factor_output / "portfolio_factor_exposures.csv")
+            if factor_summary:
+                cols = st.columns(4)
+                cols[0].metric("R²", _number(factor_summary.get("r_squared")))
+                cols[1].metric("组合年化波动率", _pct(factor_summary.get("portfolio_annualized_volatility")))
+                cols[2].metric("因子解释波动率", _pct(factor_summary.get("factor_explained_annualized_volatility")))
+                cols[3].metric("残差波动率", _pct(factor_summary.get("residual_annualized_volatility")))
+                for warning in factor_summary.get("warnings", []):
+                    st.warning(str(warning))
+            if factor_exposures is not None:
+                st.dataframe(_display_frame(factor_exposures), hide_index=True, use_container_width=True)
+            if factor_summary is None:
+                st.info("尚无因子风险分析结果。")
+
+        with paper_tab:
+            st.markdown("### 将目标权重转换为模拟成交和未成交订单")
+            st.caption("纸面模拟不会连接券商。默认只预览订单；只有勾选“提交模拟账本”才会写入本地模拟现金和股数。")
+            paper_use_optimizer = st.checkbox(
+                "使用最新组合优化权重",
+                value=(optimizer_output / "portfolio_optimized_weights.csv").is_file(),
+                key="paper_use_optimizer_weights",
+            )
+            paper_targets_upload = None
+            if not paper_use_optimizer:
+                paper_targets_upload = st.file_uploader(
+                    "目标权重 CSV（ticker,weight）",
+                    type=["csv"],
+                    key="paper_target_weights_upload",
+                )
+            paper_holdings_upload = st.file_uploader(
+                "初始持仓 CSV（ticker,shares；不上传则使用已保存持仓）",
+                type=["csv"],
+                key="paper_holdings_upload",
+            )
+            paper_cash = st.number_input("纸面账户现金", min_value=0.0, value=0.0, step=500.0)
+            paper_fee = st.number_input("模拟手续费（基点）", min_value=0.0, max_value=1000.0, value=5.0)
+            paper_slippage = st.number_input("基础滑点（基点）", min_value=0.0, max_value=1000.0, value=5.0)
+            paper_use_volume = st.checkbox(
+                "按最近日均成交量限制订单参与率",
+                value=True,
+                key="paper_use_volume",
+                help="使用 data/raw/<TICKER>_daily.csv 的 Volume 数据，缺失或过期时会停止模拟，不会跳过流动性限制。",
+            )
+            paper_participation = st.number_input(
+                "最大成交参与率", min_value=0.001, max_value=1.0, value=0.05, step=0.01, format="%.3f",
+            )
+            paper_impact = st.number_input(
+                "平方根市场冲击系数（基点）", min_value=0.0, max_value=1000.0, value=15.0, step=1.0,
+                help="额外滑点 = 系数 × sqrt(成交股数 / ADV)，是近似假设，不是校准后的微观结构模型。",
+            )
+            paper_commit = st.checkbox(
+                "提交模拟账本（会保存纸面现金和股数）",
+                value=False,
+                key="paper_commit_ledger",
+                help="默认关闭。开启后会更新本地 outputs/tools/paper_trading/paper_trading_ledger.json。",
+            )
+            if st.button("运行纸面交易模拟", type="primary", key="run_paper_trading"):
+                try:
+                    if paper_use_optimizer:
+                        target_path = optimizer_output / "portfolio_optimized_weights.csv"
+                        if not target_path.is_file():
+                            raise ValueError("尚无组合优化目标权重，请先运行优化器或改为上传权重 CSV。")
+                    else:
+                        if paper_targets_upload is None:
+                            raise ValueError("请上传目标权重 CSV。")
+                        target_path = persist_private_upload(paper_targets_upload, "paper_target_weights.csv")
+                    holdings_path = (
+                        persist_private_upload(paper_holdings_upload, "paper_initial_holdings.csv")
+                        if paper_holdings_upload is not None else PRIVATE_HOLDINGS_PATH
+                    )
+                    if not holdings_path.is_file():
+                        raise ValueError("没有本地持仓文件。请上传 ticker,shares 持仓 CSV。")
+                    close_prices = ROOT / "data" / "raw" / "close_price_panel.csv"
+                    if not close_prices.is_file():
+                        raise ValueError("缺少未调整收盘价面板，请先运行一次完整研究流程。")
+                    ledger_path = paper_output / "paper_trading_ledger.json"
+                    args = [
+                        "--prices", str(close_prices),
+                        "--targets-csv", str(target_path),
+                        "--holdings-csv", str(holdings_path),
+                        "--cash", str(float(paper_cash)),
+                        "--ledger-file", str(ledger_path),
+                        "--transaction-cost-bps", str(float(paper_fee)),
+                        "--slippage-bps", str(float(paper_slippage)),
+                        "--output-dir", str(paper_output),
+                    ]
+                    if paper_use_volume:
+                        args += [
+                            "--volume-dir", str(ROOT / "data" / "raw"),
+                            "--max-participation-rate", str(float(paper_participation)),
+                            "--market-impact-coefficient-bps", str(float(paper_impact)),
+                        ]
+                    if paper_commit:
+                        args.append("--commit-ledger")
+                    with st.spinner("正在模拟卖出、买入、流动性限制和交易成本……"):
+                        ok, output = run_local_tool("paper_trading.py", args)
+                    if ok:
+                        st.success("纸面交易模拟完成。请先复核订单表和未成交数量。")
+                    else:
+                        st.error("纸面交易模拟失败。请检查持仓、目标权重、报价及成交量历史。")
+                    if output:
+                        with st.expander("查看运行信息"):
+                            st.code(output[-8000:])
+                except Exception as exc:
+                    st.error(f"纸面交易输入有误：{type(exc).__name__}: {exc}")
+            paper_summary = read_json(paper_output / "paper_trading_summary.json")
+            paper_orders = read_csv(paper_output / "paper_trade_orders.csv")
+            paper_holdings_after = read_csv(paper_output / "paper_trading_holdings_after.csv")
+            if paper_summary:
+                cols = st.columns(4)
+                cols[0].metric("模拟净资产", _number(paper_summary.get("nav_after")))
+                cols[1].metric("交易摩擦成本", _number(paper_summary.get("total_simulated_friction")))
+                cols[2].metric("部分成交订单", int(paper_summary.get("partial_orders_count", 0)))
+                cols[3].metric("未成交订单", int(paper_summary.get("unfilled_orders_count", 0)))
+                if paper_summary.get("liquidity_limited_orders_count", 0):
+                    st.warning(
+                        f"有 {paper_summary['liquidity_limited_orders_count']} 笔订单受到流动性限制；"
+                        f"买入未成交 {paper_summary.get('liquidity_limited_buy_shares', 0):,.4f} 股，"
+                        f"卖出未成交 {paper_summary.get('total_sell_unfilled_shares', 0):,.4f} 股。"
+                    )
+            if paper_orders is not None:
+                st.markdown("### 模拟订单")
+                st.dataframe(_display_frame(paper_orders), hide_index=True, use_container_width=True)
+            if paper_holdings_after is not None:
+                st.markdown("### 模拟成交后持仓")
+                st.dataframe(_display_frame(paper_holdings_after), hide_index=True, use_container_width=True)
+            if paper_summary is None:
+                st.info("尚无纸面交易模拟结果。")
+
+        with monitor_tab:
+            st.markdown("### 检查集中度、波动率、回撤和行情数据时效")
+            monitor_holdings_upload = st.file_uploader(
+                "持仓 CSV（ticker,shares；可选 risk_group）",
+                type=["csv"],
+                key="monitor_holdings_upload",
+            )
+            monitor_cash = st.number_input("账户现金", min_value=0.0, value=0.0, step=500.0, key="monitor_cash")
+            monitor_single_limit = st.number_input(
+                "单股最大权重", min_value=0.01, max_value=1.0, value=0.15, step=0.01, key="monitor_single_limit",
+            )
+            monitor_group_caps_text = st.text_area(
+                "风险主题上限 JSON（可选）",
+                value="{}",
+                key="monitor_group_caps",
+                help='例如 {"semiconductor":0.35,"technology":0.50}',
+            )
+            monitor_volatility = st.number_input(
+                "年化波动率告警线", min_value=0.01, max_value=2.0, value=0.40, step=0.05, key="monitor_volatility_limit",
+            )
+            monitor_drawdown = st.number_input(
+                "历史最大回撤告警线", min_value=0.01, max_value=1.0, value=0.25, step=0.05, key="monitor_drawdown_limit",
+            )
+            monitor_max_age = st.number_input(
+                "行情最大日历日龄", min_value=0, max_value=365, value=5, step=1, key="monitor_max_price_age",
+            )
+            if st.button("运行组合风险监控", type="primary", key="run_risk_monitor"):
+                try:
+                    holdings_path = (
+                        persist_private_upload(monitor_holdings_upload, "monitor_holdings.csv")
+                        if monitor_holdings_upload is not None else PRIVATE_HOLDINGS_PATH
+                    )
+                    if not holdings_path.is_file():
+                        raise ValueError("没有本地持仓文件。请上传持仓 CSV。")
+                    close_prices = ROOT / "data" / "raw" / "close_price_panel.csv"
+                    adjusted_prices = ROOT / "data" / "raw" / "adjusted_close_panel.csv"
+                    if not close_prices.is_file() or not adjusted_prices.is_file():
+                        raise ValueError("缺少未调整或调整收盘价面板，请先运行完整研究流程。")
+                    group_caps = parse_json_object_text(monitor_group_caps_text, "风险主题上限")
+                    args = [
+                        "--holdings-csv", str(holdings_path),
+                        "--prices", str(close_prices),
+                        "--adjusted-prices", str(adjusted_prices),
+                        "--cash", str(float(monitor_cash)),
+                        "--single-name-limit", str(float(monitor_single_limit)),
+                        "--volatility-limit", str(float(monitor_volatility)),
+                        "--drawdown-limit", str(float(monitor_drawdown)),
+                        "--max-data-age-days", str(int(monitor_max_age)),
+                        "--output-dir", str(monitor_output),
+                    ]
+                    if group_caps:
+                        args += ["--group-caps-json", str(write_private_json(group_caps, "monitor_group_caps.json"))]
+                    with st.spinner("正在计算持仓风险与告警……"):
+                        ok, output = run_local_tool("risk_monitor.py", args)
+                    if ok:
+                        st.success("组合风险监控完成。")
+                    else:
+                        st.error("风险监控失败。请检查持仓代码、价格面板和风险主题配置。")
+                    if output:
+                        with st.expander("查看运行信息"):
+                            st.code(output[-8000:])
+                except Exception as exc:
+                    st.error(f"风险监控输入有误：{type(exc).__name__}: {exc}")
+            monitor_summary = read_json(monitor_output / "risk_monitor_snapshot.json")
+            monitor_alerts = read_csv(monitor_output / "risk_monitor_alerts.csv")
+            monitor_positions = read_csv(monitor_output / "risk_monitor_positions.csv")
+            if monitor_summary:
+                cols = st.columns(4)
+                cols[0].metric("账户净资产估值", _number(monitor_summary.get("net_equity")))
+                cols[1].metric("历史年化波动率", _pct(monitor_summary.get("annualized_volatility")))
+                cols[2].metric("历史最大回撤", _pct(monitor_summary.get("max_drawdown")))
+                cols[3].metric("告警数量", int(monitor_summary.get("alert_count", 0)))
+            if monitor_alerts is not None and not monitor_alerts.empty:
+                st.markdown("### 当前告警")
+                for row in monitor_alerts.itertuples(index=False):
+                    if getattr(row, "level", "") == "warning":
+                        st.warning(str(getattr(row, "message", "")))
+                    else:
+                        st.info(str(getattr(row, "message", "")))
+            elif monitor_summary:
+                st.success("当前阈值下暂未触发风险告警。")
+            if monitor_positions is not None:
+                st.markdown("### 当前持仓与权重")
+                st.dataframe(_display_frame(monitor_positions), hide_index=True, use_container_width=True)
+            if monitor_summary is None:
+                st.info("尚无组合风险监控结果。")
 
     with files_tab:
         st.subheader("研究报告与结果文件")
