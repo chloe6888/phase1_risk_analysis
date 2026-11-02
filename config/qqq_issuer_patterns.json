@@ -1,0 +1,33 @@
+{
+  "AVGO": [
+    "AVGO",
+    "BROADCOM"
+  ],
+  "GOOG": [
+    "GOOG",
+    "GOOGL",
+    "ALPHABET",
+    "GOOGLE"
+  ],
+  "LRCX": [
+    "LRCX",
+    "LAM RESEARCH"
+  ],
+  "MRVL": [
+    "MRVL",
+    "MARVELL TECHNOLOGY",
+    "MARVELL"
+  ],
+  "MU": [
+    "MU",
+    "MICRON"
+  ],
+  "OKTA": [
+    "OKTA"
+  ],
+  "SKHY": [
+    "SKHY",
+    "SK HYNIX",
+    "000660"
+  ]
+}
