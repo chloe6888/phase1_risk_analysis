@@ -90,6 +90,22 @@ def discover_latest_etf_snapshots(
     return selected
 
 
+def resolve_etf_snapshot_paths(
+    explicit_paths: Sequence[str | Path],
+    snapshot_dir: str | Path = DEFAULT_ETF_SNAPSHOT_DIR,
+    *,
+    fund_tickers: Sequence[str] = ("DRAM", "QQQ"),
+    as_of_date: str | date | None = None,
+) -> list[Path]:
+    """Use explicit manifests when supplied; otherwise auto-discover dated snapshots."""
+    explicit = [Path(path) for path in explicit_paths]
+    if explicit:
+        return explicit
+    return discover_latest_etf_snapshots(
+        snapshot_dir, fund_tickers=fund_tickers, as_of_date=as_of_date
+    )
+
+
 def _write_summary(payload: dict[str, Any], output_dir: str | Path) -> tuple[Path, Path]:
     target = Path(output_dir)
     target.mkdir(parents=True, exist_ok=True)
@@ -243,7 +259,8 @@ def run_portfolio_suite(
     held_funds = [
         ticker for ticker in ("DRAM", "QQQ") if ticker in set(universe["holding_tickers"])
     ]
-    effective_snapshot_paths = list(snapshot_paths) if snapshot_paths else discover_latest_etf_snapshots(
+    effective_snapshot_paths = resolve_etf_snapshot_paths(
+        snapshot_paths,
         etf_snapshot_dir,
         fund_tickers=held_funds,
         as_of_date=as_of_date or acceptance.get("as_of_date"),
