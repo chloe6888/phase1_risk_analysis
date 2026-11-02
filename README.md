@@ -407,13 +407,13 @@ python risk_monitor.py \
   --adjusted-prices data/raw/adjusted_close_panel.csv \
   --cash 5000 \
   --single-name-limit 0.15 \
-  --group-caps-json data/private/risk_group_caps.json \
-  --subgroup-caps-json data/private/risk_subgroup_caps.json \
+  --group-caps-json risk_profiles/balanced_group_caps.json \
+  --subgroup-caps-json risk_profiles/balanced_subgroup_caps.json \
   --volatility-limit 0.30 \
   --drawdown-limit 0.20
 ```
 
-持仓 CSV 可增加 `risk_group` 列；也可以通过 `--groups-json` 与 `--group-caps-json` 覆盖分组和上限。输出包括 `risk_monitor_positions.csv`、`risk_monitor_alerts.csv`、`risk_monitor_daily_path.csv`、`risk_monitor_snapshot.json` 和 `risk_monitor_report.md`。
+持仓 CSV 可增加 `risk_group` 和 `subgroup` 列；也可以通过 `--groups-json`、`--group-caps-json` 与 `--subgroup-caps-json` 覆盖一级分组、二级子主题和上限。仓库提供 `risk_profiles/balanced_group_caps.json` 与 `risk_profiles/balanced_subgroup_caps.json` 作为平衡型的初始复核阈值；这些上限只触发告警，不自动生成卖出指令。输出包括 `risk_monitor_positions.csv`、`risk_monitor_alerts.csv`、`risk_monitor_daily_path.csv`、`risk_monitor_snapshot.json` 和 `risk_monitor_report.md`。
 
 **历史口径限制：** 历史风险路径将当前股数应用于过去的调整收盘价，并假设现金余额不变；它不是按历史交易、入金、出金及公司行动重建的真实账户净值。因此历史波动率、回撤和 VaR/CVaR 是风险代理估计，而不是实际账户历史业绩或损失上限。阈值是用户配置的风险预算规则，监控只产生告警，不自动交易。
 
