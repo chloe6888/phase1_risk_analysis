@@ -108,7 +108,7 @@ def validate_holdings_file(
             f"Private holdings file not found: {source}. Copy your holdings CSV to data/private/holdings_snapshot.csv."
         )
     try:
-        raw = pd.read_csv(source)
+        raw = pd.read_csv(source, dtype=str, keep_default_na=False)
     except Exception as exc:
         raise ValueError(f"Cannot read private holdings CSV: {exc}") from exc
     raw.columns = [str(column).strip().lower() for column in raw.columns]
