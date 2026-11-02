@@ -155,3 +155,36 @@ def test_generic_fund_ticker_is_used_in_manifest_and_cli_artifact_names(tmp_path
     assert (output / "QQQ_holdings_2026-10-29.csv").exists()
     assert (output / "QQQ_issuer_exposures_2026-10-29.csv").exists()
     assert (output / "QQQ_lookthrough_2026-10-29.json").exists()
+
+
+
+def test_default_issuer_map_recognizes_all_held_operating_companies(tmp_path: Path) -> None:
+    path = tmp_path / "qqq.csv"
+    pd.DataFrame([
+        {"Ticker": "AVGO US", "Name": "Broadcom Inc", "Weight": "5%"},
+        {"Ticker": "GOOG US", "Name": "Alphabet Inc Class C", "Weight": "4%"},
+        {"Ticker": "GOOGL US", "Name": "Alphabet Inc Class A", "Weight": "2%"},
+        {"Ticker": "LRCX US", "Name": "Lam Research Corp", "Weight": "3%"},
+        {"Ticker": "MRVL US", "Name": "Marvell Technology Inc", "Weight": "3%"},
+        {"Ticker": "MU US", "Name": "Micron Technology Inc", "Weight": "4%"},
+        {"Ticker": "OKTA US", "Name": "Okta Inc", "Weight": "2%"},
+        {"Ticker": "000660 KS", "Name": "SK hynix Inc", "Weight": "3%"},
+        {"Ticker": "CASH", "Name": "Cash and cash equivalents", "Weight": "74%"},
+    ]).to_csv(path, index=False)
+
+    _, issuers, manifest = app.import_etf_holdings(
+        path, fund_ticker="QQQ", as_of="2026-10-30"
+    )
+
+    expected = {
+        "AVGO": 5.0,
+        "GOOG": 6.0,
+        "LRCX": 3.0,
+        "MRVL": 3.0,
+        "MU": 4.0,
+        "OKTA": 2.0,
+        "SKHY": 3.0,
+    }
+    assert manifest["issuer_weights_pct"] == pytest.approx(expected)
+    assert set(issuers["issuer"]) == set(expected)
+    assert manifest["weight_total_in_range"] is True

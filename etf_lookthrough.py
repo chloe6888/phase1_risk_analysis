@@ -34,12 +34,15 @@ COLUMN_ALIASES = {
     "market_value": {"marketvalue", "marketvalueusd", "value", "marketvalue($)"},
 }
 DEFAULT_ISSUER_PATTERNS = {
-    "MU": [
-        "MICRON", "MICRON TECHNOLOGY", "MU US", "MU UW", "MU.O",
-    ],
-    "SKHY": [
-        "SK HYNIX", "SKHY", "SK HYNIX INC", "000660", "000660 KS",
-    ],
+    # Canonical issuers align to the seven operating-company positions in the
+    # personal portfolio. GOOG and GOOGL share one economic issuer bucket.
+    "AVGO": ["AVGO", "BROADCOM", "AVAGO TECHNOLOGIES"],
+    "GOOG": ["GOOG", "GOOGL", "ALPHABET INC", "ALPHABET CLASS"],
+    "LRCX": ["LRCX", "LAM RESEARCH"],
+    "MRVL": ["MRVL", "MARVELL TECHNOLOGY"],
+    "MU": ["MICRON", "MICRON TECHNOLOGY", "MU US", "MU UW", "MU.O"],
+    "OKTA": ["OKTA", "OKTA INC"],
+    "SKHY": ["SK HYNIX", "SKHY", "000660", "000660 KS"],
 }
 
 

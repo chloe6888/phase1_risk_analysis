@@ -25,11 +25,88 @@ import position_decision_rules as decision_rules
 import run_personal_portfolio as data_pipeline
 import run_personal_risk_analysis as risk_analysis
 import run_valuation as valuation_pipeline
+from etf_lookthrough import load_issuer_snapshot
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_OUTPUT = ROOT / "outputs" / "personal_suite"
 DEFAULT_VALUATION_OUTPUT = ROOT / "outputs" / "valuation"
 DEFAULT_DECISION_OUTPUT = ROOT / "outputs" / "position_decisions"
+DEFAULT_ETF_SNAPSHOT_DIR = ROOT / "outputs" / "etf_holdings"
+
+
+
+
+def discover_latest_etf_snapshots(
+    snapshot_dir: str | Path = DEFAULT_ETF_SNAPSHOT_DIR,
+    *,
+    fund_tickers: Sequence[str] = ("DRAM", "QQQ"),
+    as_of_date: str | date | None = None,
+) -> list[Path]:
+    """Select the newest valid dated issuer snapshot per held fund.
+
+    Only snapshots dated on or before the analysis date are eligible. Duplicate
+    manifests for the same fund and latest date are rejected as ambiguous.
+    Invalid manifests are not silently ignored.
+    """
+    reference_date = (
+        date.today() if as_of_date is None
+        else as_of_date.date() if isinstance(as_of_date, datetime)
+        else as_of_date if isinstance(as_of_date, date)
+        else date.fromisoformat(str(as_of_date))
+    )
+    target_funds = {str(item).strip().upper() for item in fund_tickers if str(item).strip()}
+    if not target_funds:
+        return []
+    directory = Path(snapshot_dir)
+    if not directory.exists():
+        return []
+    if not directory.is_dir():
+        raise ValueError(f"ETF snapshot path is not a directory: {directory}")
+
+    candidates: dict[str, list[tuple[date, Path]]] = {}
+    for path in sorted(directory.glob("*_lookthrough_*.json")):
+        try:
+            _, snapshot_as_of, manifest = load_issuer_snapshot(path)
+        except ValueError as exc:
+            raise ValueError(f"Invalid ETF snapshot {path.name}: {exc}") from exc
+        fund = str(manifest.get("fund_ticker", "")).strip().upper()
+        if fund not in target_funds:
+            continue
+        snapshot_date = date.fromisoformat(snapshot_as_of)
+        if snapshot_date > reference_date:
+            continue
+        candidates.setdefault(fund, []).append((snapshot_date, path))
+
+    selected: list[Path] = []
+    for fund in sorted(target_funds):
+        rows = candidates.get(fund, [])
+        if not rows:
+            continue
+        latest_date = max(item[0] for item in rows)
+        latest_paths = [path for snapshot_date, path in rows if snapshot_date == latest_date]
+        if len(latest_paths) != 1:
+            raise ValueError(
+                f"{fund} has multiple ETF snapshots dated {latest_date.isoformat()}; "
+                "remove or rename duplicates after reviewing their provenance."
+            )
+        selected.append(latest_paths[0])
+    return selected
+
+
+def resolve_etf_snapshot_paths(
+    explicit_paths: Sequence[str | Path],
+    snapshot_dir: str | Path = DEFAULT_ETF_SNAPSHOT_DIR,
+    *,
+    fund_tickers: Sequence[str] = ("DRAM", "QQQ"),
+    as_of_date: str | date | None = None,
+) -> list[Path]:
+    """Use explicit manifests when supplied; otherwise auto-discover dated snapshots."""
+    explicit = [Path(path) for path in explicit_paths]
+    if explicit:
+        return explicit
+    return discover_latest_etf_snapshots(
+        snapshot_dir, fund_tickers=fund_tickers, as_of_date=as_of_date
+    )
 
 
 def _write_summary(payload: dict[str, Any], output_dir: str | Path) -> tuple[Path, Path]:
@@ -154,9 +231,10 @@ def run_portfolio_suite(
     refresh: bool = True,
     cash: float | None = None,
     snapshot_paths: Sequence[str | Path] = (),
+    etf_snapshot_dir: str | Path = DEFAULT_ETF_SNAPSHOT_DIR,
     as_of_date: str | date | None = None,
 ) -> dict[str, Any]:
-    """Run acceptance first, then risk and allocation reports unless blocked."""
+    """Run acceptance, risk, allocation, valuation and position review in order."""
     if cash is not None:
         try:
             cash_value = float(cash)
@@ -179,6 +257,17 @@ def run_portfolio_suite(
     acceptance_status = str(acceptance.get("status", "UNKNOWN")).upper()
     if acceptance_status not in {"PASS", "WARNING", "BLOCKED"}:
         raise ValueError(f"Unexpected data-acceptance status: {acceptance_status!r}.")
+
+    universe = data_pipeline.load_universe(config_path)
+    held_funds = [
+        ticker for ticker in ("DRAM", "QQQ") if ticker in set(universe["holding_tickers"])
+    ]
+    effective_snapshot_paths = resolve_etf_snapshot_paths(
+        snapshot_paths,
+        etf_snapshot_dir,
+        fund_tickers=held_funds,
+        as_of_date=as_of_date or acceptance.get("as_of_date"),
+    )
 
     warnings: list[str] = []
     if acceptance_status == "WARNING":
@@ -238,7 +327,7 @@ def run_portfolio_suite(
             stress_profile_path=stress_profile_path,
             output_dir=risk_output_dir,
             cash=cash_value,
-            snapshot_paths=snapshot_paths,
+            snapshot_paths=effective_snapshot_paths,
             as_of_date=as_of_date,
         )
         risk_summary = risk_result["summary"]
@@ -250,6 +339,7 @@ def run_portfolio_suite(
             "alert_count": risk_summary.get("alert_count"),
             "lookthrough_status": risk_summary.get("lookthrough_status"),
             "lookthrough_funds_missing": risk_summary.get("lookthrough_funds_missing", []),
+            "etf_snapshot_files": [str(path) for path in effective_snapshot_paths],
         }
         if risk_summary.get("lookthrough_status") == "partial_or_missing_or_stale":
             warnings.append("DRAM/QQQ 的一项或多项有日期 ETF 持仓快照缺失、过期或不完整；发行人穿透敞口尚不能视为完整。")
@@ -436,7 +526,13 @@ def main() -> None:
         type=Path,
         action="append",
         default=[],
-        help="Dated DRAM/QQQ issuer snapshot JSON; repeat for each fund.",
+        help="Explicit dated DRAM/QQQ issuer snapshot JSON; overrides auto-discovery when supplied.",
+    )
+    parser.add_argument(
+        "--etf-snapshot-dir",
+        type=Path,
+        default=DEFAULT_ETF_SNAPSHOT_DIR,
+        help="Directory containing dated *_lookthrough_*.json manifests; newest eligible snapshot per held fund is selected.",
     )
     parser.add_argument("--as-of-date", help="Analysis date YYYY-MM-DD.")
     refresh = parser.add_mutually_exclusive_group()
@@ -469,6 +565,7 @@ def main() -> None:
             refresh=args.refresh,
             cash=args.cash,
             snapshot_paths=args.lookthrough_snapshot,
+            etf_snapshot_dir=args.etf_snapshot_dir,
             as_of_date=args.as_of_date,
         )
     except (ValueError, OSError, RuntimeError) as exc:
