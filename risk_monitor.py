@@ -76,8 +76,8 @@ def analyze_risk_snapshot(
     group_max_weights: Mapping[str, float] | None = None,
     subgroup_max_weights: Mapping[str, float] | None = None,
     single_name_limit: float = 0.15,
-    volatility_limit_annual: float = 0.40,
-    drawdown_limit: float = 0.25,
+    volatility_limit_annual: float = 0.30,
+    drawdown_limit: float = 0.20,
     volatility_window: int = 60,
     minimum_observations: int = 20,
     max_data_age_calendar_days: int | None = None,
@@ -346,8 +346,8 @@ def main() -> None:
     parser.add_argument("--group-caps-json", type=Path)
     parser.add_argument("--subgroup-caps-json", type=Path)
     parser.add_argument("--groups-json", type=Path)
-    parser.add_argument("--volatility-limit", type=float, default=0.40)
-    parser.add_argument("--drawdown-limit", type=float, default=0.25)
+    parser.add_argument("--volatility-limit", type=float, default=0.30)
+    parser.add_argument("--drawdown-limit", type=float, default=0.20)
     parser.add_argument("--volatility-window", type=int, default=60)
     parser.add_argument("--max-data-age-days", type=int, default=5)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
