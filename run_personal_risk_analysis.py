@@ -214,8 +214,15 @@ def analyze_personal_risk(
             "notes", ["Scenario shocks are illustrative assumptions, not forecasts."]
         ),
         "lookthrough_status": (
-            "complete" if not lookthrough_summary["fund_snapshots_missing"] and lookthrough_snapshots
-            else "partial_or_missing"
+            "not_applicable"
+            if not (set(fund_tickers) & set(holdings["ticker"].astype(str)))
+            else (
+                "complete"
+                if not lookthrough_summary["fund_snapshots_missing"]
+                and lookthrough_snapshots
+                and all(row["status"] == "loaded" for row in lookthrough_funds.to_dict("records"))
+                else "partial_or_missing_or_stale"
+            )
         ),
         "lookthrough_funds_missing": lookthrough_summary["fund_snapshots_missing"],
         "lookthrough_warnings": lookthrough_summary["warnings"],
