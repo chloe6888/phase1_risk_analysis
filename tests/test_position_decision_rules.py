@@ -38,3 +38,29 @@ def test_policy_has_balanced_limits():
     assert p["single_name_max_weight"] == pytest.approx(0.15)
     assert p["group_max_weights"]["semiconductor_related"] == pytest.approx(0.45)
     assert p["subgroup_max_weights"]["memory"] == pytest.approx(0.25)
+
+
+
+def test_quote_date_and_vendor_price_must_match_local_close() -> None:
+    holdings, prices, valuation = inputs()
+    valuation.loc[0, "current_price"] = 108.0
+    result, _ = evaluate_position_decisions(
+        holdings, prices, valuation, policy(), cash=1000.0,
+        as_of_date="2026-10-30", etf_tickers=(),
+    )
+    assert result.iloc[0]["decision"] == "HOLD_DATA_BLOCKED"
+
+
+def test_etf_is_classified_as_lookthrough_not_company_valuation() -> None:
+    holdings, prices, _ = inputs()
+    etf = holdings.iloc[[0]].copy()
+    etf.loc[:, "ticker"] = "DRAM"
+    etf.loc[:, "name"] = "Memory ETF"
+    etf.loc[:, "risk_group"] = "semiconductor_related"
+    etf.loc[:, "subgroup"] = "memory"
+    etf_prices = prices[["AAA"]].rename(columns={"AAA":"DRAM"})
+    result, _ = evaluate_position_decisions(
+        etf, etf_prices, pd.DataFrame(), policy(),
+        as_of_date="2026-10-30", etf_tickers=("DRAM",),
+    )
+    assert result.iloc[0]["decision"] == "ETF_LOOKTHROUGH_ONLY"
