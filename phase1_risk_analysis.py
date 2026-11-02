@@ -446,11 +446,11 @@ def save_plots(adjusted_close: pd.DataFrame) -> None:
     plt.close(fig)
 
 
-def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_hours: float = DEFAULT_MAX_CACHE_AGE_HOURS, tickers: list[str] | None = None) -> None:
+def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_hours: float = DEFAULT_MAX_CACHE_AGE_HOURS, tickers: list[str] | None = None, start_date: str = START_DATE, end_date: str = END_DATE, benchmark: str = BENCHMARK) -> None:
     active_tickers = TICKERS.copy() if tickers is None else [str(ticker).strip().upper() for ticker in tickers]
     if not active_tickers or any(not ticker for ticker in active_tickers):
         raise ValueError("At least one valid ticker must be supplied.")
-    if BENCHMARK not in active_tickers:
+    if benchmark not in active_tickers:
         raise ValueError(
             f"Benchmark {BENCHMARK!r} must be included in TICKERS. "
             "Update the configuration at the top of this file."
@@ -463,7 +463,7 @@ def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_h
 
     print(f"Tickers: {', '.join(active_tickers)}")
     if refresh:
-        print(f"Refreshing data: {START_DATE} to before {END_DATE} (end date exclusive)")
+        print(f"Refreshing data: {start_date} to before {end_date} (end date exclusive)")
     else:
         print("Using local CSV cache when available; missing tickers will be downloaded.")
     raw_data: dict[str, pd.DataFrame] = {}
@@ -473,7 +473,7 @@ def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_h
     for ticker in active_tickers:
         print(f"Loading {ticker} ...")
         try:
-            data = get_ticker_data(ticker, START_DATE, END_DATE, refresh=refresh, allow_stale_cache=allow_stale_cache, max_cache_age_hours=max_cache_age_hours)
+            data = get_ticker_data(ticker, start_date, end_date, refresh=refresh, allow_stale_cache=allow_stale_cache, max_cache_age_hours=max_cache_age_hours)
         except Exception as exc:
             raise RuntimeError(f"Download/validation failed for {ticker}: {exc}") from exc
         raw_data[ticker] = data
@@ -493,7 +493,7 @@ def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_h
     daily_returns = adjusted_close.pct_change(fill_method=None)
     daily_returns.to_csv(OUT_DIR / "daily_returns.csv", float_format="%.10f")
 
-    metrics = compute_risk_metrics(adjusted_close, BENCHMARK)
+    metrics = compute_risk_metrics(adjusted_close, benchmark)
     metrics.to_csv(OUT_DIR / "risk_metrics.csv", float_format="%.10f")
 
     correlation = daily_returns.corr(min_periods=60)
@@ -512,9 +512,9 @@ def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_h
         "run_at_utc": datetime.now(timezone.utc).isoformat(),
         "source": "yfinance/Yahoo Finance",
         "tickers": active_tickers,
-        "benchmark": BENCHMARK,
-        "requested_start": START_DATE,
-        "requested_end_exclusive": END_DATE,
+        "benchmark": benchmark,
+        "requested_start": start_date,
+        "requested_end_exclusive": end_date,
         "data_last_dates": {ticker: data.index.max().date().isoformat() for ticker, data in raw_data.items()},
         "max_cache_age_hours": max_cache_age_hours,
         "allow_stale_cache": allow_stale_cache,
@@ -533,7 +533,7 @@ def main(refresh: bool = False, allow_stale_cache: bool = False, max_cache_age_h
     display_metrics = metrics.copy()
     for col in ["mean_daily_return", "CAGR", "annualized_volatility", "maximum_drawdown"]:
         display_metrics[col] = display_metrics[col].map(lambda x: f"{x:.2%}" if pd.notna(x) else "NA")
-    display_metrics[f"beta_vs_{BENCHMARK}"] = display_metrics[f"beta_vs_{BENCHMARK}"].map(
+    display_metrics[f"beta_vs_{benchmark}"] = display_metrics[f"beta_vs_{benchmark}"].map(
         lambda x: f"{x:.3f}" if pd.notna(x) else "NA"
     )
     print(display_metrics.to_string())
@@ -576,7 +576,20 @@ if __name__ == "__main__":
         default=DEFAULT_MAX_CACHE_AGE_HOURS,
         help=f"maximum cache age before refresh (default: {DEFAULT_MAX_CACHE_AGE_HOURS:g} hours)",
     )
+    parser.add_argument("--start-date", default=START_DATE, help="inclusive start date (YYYY-MM-DD)")
+    parser.add_argument("--end-date", default=END_DATE, help="exclusive end date (YYYY-MM-DD)")
+    parser.add_argument("--benchmark", default=BENCHMARK, help="benchmark ticker; must be included in --tickers")
     args = parser.parse_args()
     if args.max_cache_age_hours <= 0:
         parser.error("--max-cache-age-hours must be positive")
-    main(refresh=args.refresh, allow_stale_cache=args.allow_stale_cache, max_cache_age_hours=args.max_cache_age_hours, tickers=[item.strip().upper() for item in args.tickers.split(",") if item.strip()] if args.tickers else None)
+    if pd.Timestamp(args.start_date) >= pd.Timestamp(args.end_date):
+        parser.error("--start-date must be earlier than --end-date")
+    main(
+        refresh=args.refresh,
+        allow_stale_cache=args.allow_stale_cache,
+        max_cache_age_hours=args.max_cache_age_hours,
+        tickers=[item.strip().upper() for item in args.tickers.split(",") if item.strip()] if args.tickers else None,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        benchmark=args.benchmark.strip().upper(),
+    )
