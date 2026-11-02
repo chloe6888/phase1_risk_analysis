@@ -435,6 +435,7 @@ def test_personal_risk_allocation_and_decision_tools_are_allowlisted() -> None:
         "run_personal_risk_analysis.py",
         "portfolio_allocation_comparison.py",
         "position_decision_rules.py",
+        "run_personal_portfolio_suite.py",
     }
     assert expected.issubset(app.LOCAL_TOOL_SCRIPTS)
     for script in expected:
@@ -452,6 +453,7 @@ def test_dashboard_exposes_personal_risk_allocation_and_cash_confirmation_contro
         "运行加减仓规则复核",
         "运行个人组合风险分析",
         "运行资产配置比较",
+        "运行完整组合研究",
     }
     assert expected_buttons.issubset({widget.label for widget in page.button})
 
@@ -459,6 +461,7 @@ def test_dashboard_exposes_personal_risk_allocation_and_cash_confirmation_contro
         "我已核实账户可用现金（用于加仓规则）",
         "我已核实账户现金余额（用于风险分母）",
         "我已核实账户现金余额（用于当前组合权重）",
+        "我已核实账户现金余额（用于完整组合研究）",
     }
     for label in cash_checks:
         widget = next(item for item in page.checkbox if item.label == label)
