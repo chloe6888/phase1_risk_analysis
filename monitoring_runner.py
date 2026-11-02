@@ -340,9 +340,10 @@ def run_monitoring(
     cash: float = 0.0,
     groups: Mapping[str, str] | None = None,
     group_max_weights: Mapping[str, float] | None = None,
+    subgroup_max_weights: Mapping[str, float] | None = None,
     single_name_limit: float = 0.15,
-    volatility_limit_annual: float = 0.40,
-    drawdown_limit: float = 0.25,
+    volatility_limit_annual: float = 0.30,
+    drawdown_limit: float = 0.20,
     volatility_window: int = 60,
     minimum_observations: int = 20,
     max_data_age_calendar_days: int | None = 5,
@@ -375,6 +376,7 @@ def run_monitoring(
             cash=cash,
             groups=groups,
             group_max_weights=group_max_weights,
+            subgroup_max_weights=subgroup_max_weights,
             single_name_limit=single_name_limit,
             volatility_limit_annual=volatility_limit_annual,
             drawdown_limit=drawdown_limit,
@@ -500,9 +502,10 @@ def main() -> None:
     parser.add_argument("--cash", type=float, default=0.0)
     parser.add_argument("--groups-json", type=Path)
     parser.add_argument("--group-caps-json", type=Path)
+    parser.add_argument("--subgroup-caps-json", type=Path)
     parser.add_argument("--single-name-limit", type=float, default=0.15)
-    parser.add_argument("--volatility-limit", type=float, default=0.40)
-    parser.add_argument("--drawdown-limit", type=float, default=0.25)
+    parser.add_argument("--volatility-limit", type=float, default=0.30)
+    parser.add_argument("--drawdown-limit", type=float, default=0.20)
     parser.add_argument("--volatility-window", type=int, default=60)
     parser.add_argument("--minimum-observations", type=int, default=20)
     parser.add_argument("--max-data-age-days", type=int, default=5)
@@ -516,6 +519,7 @@ def main() -> None:
     adjusted_prices = load_price_panel(args.adjusted_prices)
     groups = _load_json_mapping(args.groups_json, "groups")
     group_caps = _load_json_mapping(args.group_caps_json, "group caps")
+    subgroup_caps = _load_json_mapping(args.subgroup_caps_json, "subgroup caps")
     result = run_monitoring(
         holdings,
         close_prices,
@@ -524,6 +528,7 @@ def main() -> None:
         cash=args.cash,
         groups={str(k): str(v) for k, v in groups.items()},
         group_max_weights={str(k): float(v) for k, v in group_caps.items()},
+        subgroup_max_weights={str(k): float(v) for k, v in subgroup_caps.items()},
         single_name_limit=args.single_name_limit,
         volatility_limit_annual=args.volatility_limit,
         drawdown_limit=args.drawdown_limit,

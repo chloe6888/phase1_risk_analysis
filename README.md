@@ -398,7 +398,7 @@ python paper_trading.py \
 
 ## 组合风险监控
 
-新增 `risk_monitor.py`，按当前持仓计算个股权重和主题/分组敞口，并检查单股上限、分组上限、历史年化波动率、历史最大回撤、单期 95% VaR/CVaR、历史不足和价格数据过期。
+新增 `risk_monitor.py`，按当前持仓计算个股权重、一级行业/主题和二级子主题敞口，并检查单股上限、一级分组上限、二级子主题上限、历史年化波动率、历史最大回撤、单期 95% VaR/CVaR、历史不足和价格数据过期。报告同时输出基于当前权重与历史协方差矩阵的单项资产风险贡献百分比，贡献合计约为 100%；该指标是当前权重的静态边际风险分解，不是历史盈亏归因。共同日收益少于 126 个时会触发风险估计仅属初步结果的告警；126 至 251 个观测会在摘要中标记为不足一年，但不会制造独立告警事件。
 
 ```bash
 python risk_monitor.py \
@@ -407,11 +407,13 @@ python risk_monitor.py \
   --adjusted-prices data/raw/adjusted_close_panel.csv \
   --cash 5000 \
   --single-name-limit 0.15 \
-  --volatility-limit 0.40 \
-  --drawdown-limit 0.25
+  --group-caps-json risk_profiles/balanced_group_caps.json \
+  --subgroup-caps-json risk_profiles/balanced_subgroup_caps.json \
+  --volatility-limit 0.30 \
+  --drawdown-limit 0.20
 ```
 
-持仓 CSV 可增加 `risk_group` 列；也可以通过 `--groups-json` 与 `--group-caps-json` 覆盖分组和上限。输出包括 `risk_monitor_positions.csv`、`risk_monitor_alerts.csv`、`risk_monitor_daily_path.csv`、`risk_monitor_snapshot.json` 和 `risk_monitor_report.md`。
+持仓 CSV 可增加 `risk_group` 和 `subgroup` 列；也可以通过 `--groups-json`、`--group-caps-json` 与 `--subgroup-caps-json` 覆盖一级分组、二级子主题和上限。仓库提供 `risk_profiles/balanced_group_caps.json` 与 `risk_profiles/balanced_subgroup_caps.json` 作为平衡型的初始复核阈值；这些上限只触发告警，不自动生成卖出指令。输出包括 `risk_monitor_positions.csv`、`risk_monitor_alerts.csv`、`risk_monitor_daily_path.csv`、`risk_monitor_snapshot.json` 和 `risk_monitor_report.md`。
 
 **历史口径限制：** 历史风险路径将当前股数应用于过去的调整收盘价，并假设现金余额不变；它不是按历史交易、入金、出金及公司行动重建的真实账户净值。因此历史波动率、回撤和 VaR/CVaR 是风险代理估计，而不是实际账户历史业绩或损失上限。阈值是用户配置的风险预算规则，监控只产生告警，不自动交易。
 
@@ -426,6 +428,8 @@ python monitoring_runner.py \
   --holdings-csv data/private/holdings_snapshot.csv \
   --prices data/raw/close_price_panel.csv \
   --adjusted-prices data/raw/adjusted_close_panel.csv \
+  --group-caps-json risk_profiles/balanced_group_caps.json \
+  --subgroup-caps-json risk_profiles/balanced_subgroup_caps.json \
   --cash 5000 \
   --mode daily
 ```

@@ -1823,16 +1823,22 @@ def main() -> None:
                 "单股最大权重", min_value=0.01, max_value=1.0, value=0.15, step=0.01, key="monitor_single_limit",
             )
             monitor_group_caps_text = st.text_area(
-                "风险主题上限 JSON（可选）",
-                value="{}",
+                "一级行业/主题上限 JSON",
+                value='{"semiconductor_related":0.45,"internet_platform":0.40,"enterprise_security":0.20,"broad_tech_etf":0.25}',
                 key="monitor_group_caps",
-                help='例如 {"semiconductor":0.35,"technology":0.50}',
+                help='例如 {"semiconductor_related":0.45,"internet_platform":0.40}',
+            )
+            monitor_subgroup_caps_text = st.text_area(
+                "二级子主题上限 JSON",
+                value='{"memory":0.25,"semiconductor_equipment":0.25,"networking_custom_silicon":0.20,"search_cloud_ai":0.35,"identity_security_software":0.20,"nasdaq_100":0.25}',
+                key="monitor_subgroup_caps",
+                help='例如 {"memory":0.25,"semiconductor_equipment":0.25}',
             )
             monitor_volatility = st.number_input(
-                "年化波动率告警线", min_value=0.01, max_value=2.0, value=0.40, step=0.05, key="monitor_volatility_limit",
+                "年化波动率告警线", min_value=0.01, max_value=2.0, value=0.30, step=0.05, key="monitor_volatility_limit",
             )
             monitor_drawdown = st.number_input(
-                "历史最大回撤告警线", min_value=0.01, max_value=1.0, value=0.25, step=0.05, key="monitor_drawdown_limit",
+                "历史最大回撤告警线", min_value=0.01, max_value=1.0, value=0.20, step=0.05, key="monitor_drawdown_limit",
             )
             monitor_max_age = st.number_input(
                 "行情最大日历日龄", min_value=0, max_value=365, value=5, step=1, key="monitor_max_price_age",
@@ -1849,7 +1855,8 @@ def main() -> None:
                     adjusted_prices = ROOT / "data" / "raw" / "adjusted_close_panel.csv"
                     if not close_prices.is_file() or not adjusted_prices.is_file():
                         raise ValueError("缺少未调整或调整收盘价面板，请先运行完整研究流程。")
-                    group_caps = parse_json_object_text(monitor_group_caps_text, "风险主题上限")
+                    group_caps = parse_json_object_text(monitor_group_caps_text, "一级行业/主题上限")
+                    subgroup_caps = parse_json_object_text(monitor_subgroup_caps_text, "二级子主题上限")
                     args = [
                         "--holdings-csv", str(holdings_path),
                         "--prices", str(close_prices),
@@ -1863,6 +1870,8 @@ def main() -> None:
                     ]
                     if group_caps:
                         args += ["--group-caps-json", str(write_private_json(group_caps, "monitor_group_caps.json"))]
+                    if subgroup_caps:
+                        args += ["--subgroup-caps-json", str(write_private_json(subgroup_caps, "monitor_subgroup_caps.json"))]
                     with st.spinner("正在计算持仓风险与告警……"):
                         ok, output = run_local_tool("risk_monitor.py", args)
                     if ok:
@@ -1895,6 +1904,9 @@ def main() -> None:
             if monitor_positions is not None:
                 st.markdown("### 当前持仓与权重")
                 st.dataframe(_display_frame(monitor_positions), hide_index=True, use_container_width=True)
+            if monitor_summary is not None and monitor_summary.get("subgroup_exposures"):
+                st.markdown("### 二级主题敞口")
+                st.json(monitor_summary["subgroup_exposures"])
             if monitor_summary is None:
                 st.info("尚无组合风险监控结果。")
 
