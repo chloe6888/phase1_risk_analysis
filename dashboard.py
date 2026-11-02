@@ -93,6 +93,7 @@ LOCAL_TOOL_SCRIPTS = {
     "run_personal_risk_analysis.py",
     "portfolio_allocation_comparison.py",
     "position_decision_rules.py",
+    "run_personal_portfolio_suite.py",
 }
 
 
@@ -1061,6 +1062,41 @@ def main() -> None:
     with overview_tab:
         st.subheader("账户概览")
         st.caption("本页回答：当前持仓集中在哪里？历史风险有多大？策略在未参与选参的后续区间表现如何？")
+
+        st.markdown("### 一键运行个人组合研究")
+        st.caption("按顺序更新行情并验收，然后生成组合风险、资产配置、七家经营性公司的估值和加减仓规则复核。数据验收 BLOCKED 时会自动停止后续分析。")
+        suite_cash_confirmed = st.checkbox(
+            "我已核实账户现金余额（用于完整组合研究）",
+            value=False,
+            key="suite_cash_confirmed",
+        )
+        suite_cash = st.number_input(
+            "已核实账户现金（USD）",
+            min_value=0.0,
+            value=0.0,
+            step=100.0,
+            disabled=not suite_cash_confirmed,
+            key="suite_cash_usd",
+        )
+        if st.button("运行完整组合研究", key="run_personal_portfolio_suite"):
+            suite_args = ["--refresh"]
+            if suite_cash_confirmed:
+                suite_args.extend(["--cash", f"{float(suite_cash):.2f}"])
+            with st.spinner("正在更新行情、验收数据并生成风险/配置/估值/规则报告……"):
+                ok, output = run_local_tool(
+                    "run_personal_portfolio_suite.py", suite_args, timeout_seconds=1800
+                )
+            if ok:
+                st.success("个人组合完整研究流程已执行。请检查各阶段状态和数据质量提示。")
+                st.session_state["personal_portfolio_suite_last_run"] = output
+            else:
+                st.error("完整研究流程未成功结束。请查看运行输出和对应阶段报告。")
+                st.code(output)
+        suite_report_path = OUTPUT_DIR / "personal_suite" / "personal_portfolio_suite.md"
+        if suite_report_path.is_file():
+            st.markdown(suite_report_path.read_text(encoding="utf-8"))
+        else:
+            st.info("尚无完整组合研究报告。可先将持仓文件放入 data/private/holdings_snapshot.csv，再运行本入口。")
         st.markdown("### 当前风险重点")
         if imported_summary is not None:
             summary_cols = st.columns(4)
