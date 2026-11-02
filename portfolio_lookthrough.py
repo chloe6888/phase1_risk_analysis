@@ -179,7 +179,11 @@ def analyze_portfolio_lookthrough(
             "mapped_target_issuer_weight_pct": manifest.get("mapped_target_issuer_weight_pct"),
             "unmapped_weight_pct": manifest.get("unmapped_weight_pct"),
             "cash_or_cash_equivalent_weight_pct": manifest.get("cash_or_cash_equivalent_weight_pct"),
-            "status": "stale_snapshot" if snapshot_age > max_snapshot_age_calendar_days else "loaded",
+            "status": (
+                "future_snapshot" if snapshot_age < 0
+                else "stale_snapshot" if snapshot_age > max_snapshot_age_calendar_days
+                else "loaded"
+            ),
             "source_name": manifest.get("source_name"),
             "source_file": manifest.get("source_file", source_path.name),
         })
