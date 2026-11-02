@@ -14,9 +14,14 @@ def inputs():
 
 def test_add_watch_requires_cash_confirmation():
     holdings, prices, valuation = inputs()
-    result, _ = evaluate_position_decisions(holdings, prices, valuation, policy(), cash=1000.0, as_of_date="2026-10-30", etf_tickers=())
+    p = policy()
+    # This test isolates the cash gate; concentration precedence is tested separately.
+    p["single_name_max_weight"] = 1.0
+    p["group_max_weights"]["semiconductor_related"] = 1.0
+    p["subgroup_max_weights"]["memory"] = 1.0
+    result, _ = evaluate_position_decisions(holdings, prices, valuation, p, cash=1000.0, as_of_date="2026-10-30", etf_tickers=())
     assert result.iloc[0]["decision"] == "ADD_RESEARCH_WATCH"
-    result, summary = evaluate_position_decisions(holdings, prices, valuation, policy(), cash=None, as_of_date="2026-10-30", etf_tickers=())
+    result, summary = evaluate_position_decisions(holdings, prices, valuation, p, cash=None, as_of_date="2026-10-30", etf_tickers=())
     assert result.iloc[0]["decision"] == "BLOCK_ADD_CASH_UNVERIFIED"
     assert summary["cash_source"] == "not_provided"
 
