@@ -249,3 +249,83 @@ def test_valuation_failure_skips_decisions_to_avoid_stale_valuation_file(
     assert result["status"] == "PARTIAL"
     assert result["stages"]["valuation_research"]["status"] == "FAILED"
     assert result["stages"]["position_decision_review"]["status"] == "SKIPPED"
+
+
+def _write_dated_etf_snapshot(
+    path: Path,
+    fund: str,
+    as_of: str,
+    issuer_weights: dict[str, float] | None = None,
+) -> Path:
+    payload = {
+        "fund_ticker": fund,
+        "as_of": as_of,
+        "source_name": "official issuer holdings CSV",
+        "source_file": f"{fund}_{as_of}.csv",
+        "issuer_weights_pct": issuer_weights or {"MU": 20.0},
+        "warnings": [],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_discover_latest_etf_snapshots_selects_latest_not_future_per_fund(tmp_path: Path) -> None:
+    dram_old = _write_dated_etf_snapshot(
+        tmp_path / "DRAM_lookthrough_2026-10-10.json", "DRAM", "2026-10-10"
+    )
+    dram_latest = _write_dated_etf_snapshot(
+        tmp_path / "DRAM_lookthrough_2026-10-30.json", "DRAM", "2026-10-30"
+    )
+    _write_dated_etf_snapshot(
+        tmp_path / "DRAM_lookthrough_2026-11-10.json", "DRAM", "2026-11-10"
+    )
+    qqq_latest = _write_dated_etf_snapshot(
+        tmp_path / "QQQ_lookthrough_2026-10-31.json", "QQQ", "2026-10-31"
+    )
+    _write_dated_etf_snapshot(
+        tmp_path / "SPY_lookthrough_2026-10-31.json", "SPY", "2026-10-31"
+    )
+
+    result = app.discover_latest_etf_snapshots(
+        tmp_path,
+        fund_tickers=("DRAM", "QQQ"),
+        as_of_date="2026-11-02",
+    )
+    assert result == [dram_latest, qqq_latest]
+    assert dram_old not in result
+
+
+def test_discover_etf_snapshots_rejects_duplicate_latest_date(tmp_path: Path) -> None:
+    _write_dated_etf_snapshot(
+        tmp_path / "DRAM_lookthrough_a.json", "DRAM", "2026-10-30"
+    )
+    _write_dated_etf_snapshot(
+        tmp_path / "DRAM_lookthrough_b.json", "DRAM", "2026-10-30"
+    )
+
+    with pytest.raises(ValueError, match="multiple ETF snapshots"):
+        app.discover_latest_etf_snapshots(
+            tmp_path, fund_tickers=("DRAM",), as_of_date="2026-11-02"
+        )
+
+
+def test_explicit_etf_snapshot_paths_override_auto_discovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    explicit = tmp_path / "explicit_dram.json"
+    _write_dated_etf_snapshot(explicit, "DRAM", "2026-10-30")
+    auto = tmp_path / "auto"
+    _write_dated_etf_snapshot(
+        auto / "DRAM_lookthrough_2026-10-29.json", "DRAM", "2026-10-29"
+    )
+    monkeypatch.setattr(app.data_pipeline, "run_pipeline", lambda **kwargs: {
+        "status": "BLOCKED", "as_of_date": "2026-11-02",
+    })
+    result = app.run_portfolio_suite(
+        output_dir=tmp_path / "suite",
+        snapshot_paths=[explicit],
+        etf_snapshot_dir=auto,
+    )
+    assert result["stages"]["risk_analysis"]["status"] == "SKIPPED"
+    # BLOCKED acceptance intentionally stops before reading any snapshot.
