@@ -199,3 +199,29 @@ def test_cli_writes_snapshots_daily_and_weekly_reports(tmp_path: Path) -> None:
     assert second["mode"] == "weekly"
     assert second["weekly_summary"]["snapshot_count"] == 2
     assert (output_dir / "monitoring_weekly_report.md").is_file()
+
+
+def test_monitoring_runner_applies_subgroup_caps_to_scheduled_alerts(tmp_path: Path) -> None:
+    prices = synthetic_prices()
+    holdings = pd.DataFrame({
+        "ticker": ["AAA"],
+        "shares": [10],
+        "risk_group": ["semiconductor_related"],
+        "subgroup": ["memory"],
+    })
+    result = app.run_monitoring(
+        holdings,
+        prices,
+        prices,
+        output_dir=tmp_path,
+        single_name_limit=1.0,
+        group_max_weights={"semiconductor_related": 1.0},
+        subgroup_max_weights={"memory": 0.5},
+        volatility_limit_annual=1.0,
+        drawdown_limit=1.0,
+        max_data_age_calendar_days=7,
+        now=pd.Timestamp.now(tz="UTC").to_pydatetime(),
+    )
+    assert result["active_alert_count"] == 1
+    snapshot = json.loads((tmp_path / "latest_snapshot.json").read_text(encoding="utf-8"))
+    assert snapshot["active_alerts"][0]["kind"] == "subgroup_concentration"
