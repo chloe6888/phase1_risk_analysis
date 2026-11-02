@@ -48,8 +48,11 @@ def discover_latest_etf_snapshots(
     manifests for the same fund and latest date are rejected as ambiguous.
     Invalid manifests are not silently ignored.
     """
-    reference_date = date.today() if as_of_date is None else (
-        as_of_date if isinstance(as_of_date, date) else date.fromisoformat(str(as_of_date))
+    reference_date = (
+        date.today() if as_of_date is None
+        else as_of_date.date() if isinstance(as_of_date, datetime)
+        else as_of_date if isinstance(as_of_date, date)
+        else date.fromisoformat(str(as_of_date))
     )
     target_funds = {str(item).strip().upper() for item in fund_tickers if str(item).strip()}
     if not target_funds:
