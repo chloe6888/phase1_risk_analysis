@@ -65,7 +65,10 @@ def normalize_portfolio_weights(
         raise ValueError("Portfolio weights must be finite and between 0 and 1.")
     if sum(result.values()) > 1.0 + 1e-9:
         raise ValueError("Portfolio risky weights must sum to no more than 100%; residual is cash.")
-    return {key: value for key, value in result.items() if value > 1e-12}
+    positive = {key: value for key, value in result.items() if value > 1e-12}
+    if not positive:
+        raise ValueError("At least one portfolio weight must be positive.")
+    return positive
 
 
 def build_portfolio_returns(
