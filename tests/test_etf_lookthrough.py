@@ -116,3 +116,42 @@ def test_cli_writes_immutable_dated_snapshot_artifacts(tmp_path: Path) -> None:
     payload = json.loads(snapshot.read_text())
     assert payload["issuer_weights_pct"]["SKHY"] == pytest.approx(21.82)
     assert '"as_of": "2026-10-29"' in result.stdout
+
+
+
+def test_generic_fund_ticker_is_used_in_manifest_and_cli_artifact_names(tmp_path: Path) -> None:
+    source = sample_csv(tmp_path / "issuer.csv")
+    issuer_map = tmp_path / "qqq_map.json"
+    issuer_map.write_text(
+        json.dumps({"MU": ["MICRON"], "SKHY": ["SK HYNIX"]}),
+        encoding="utf-8",
+    )
+    _, _, manifest = app.import_etf_holdings(
+        source,
+        fund_ticker="QQQ",
+        as_of="2026-10-29",
+        issuer_patterns={"MU": ["MICRON"], "SKHY": ["SK HYNIX"]},
+    )
+    assert manifest["fund_ticker"] == "QQQ"
+
+    output = tmp_path / "qqq_out"
+    import sys
+    from subprocess import run
+
+    script = Path(__file__).resolve().parents[1] / "etf_lookthrough.py"
+    run(
+        [
+            sys.executable, str(script),
+            "--fund-ticker", "QQQ",
+            "--holdings-csv", str(source),
+            "--as-of", "2026-10-29",
+            "--issuer-map-json", str(issuer_map),
+            "--output-dir", str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert (output / "QQQ_holdings_2026-10-29.csv").exists()
+    assert (output / "QQQ_issuer_exposures_2026-10-29.csv").exists()
+    assert (output / "QQQ_lookthrough_2026-10-29.json").exists()

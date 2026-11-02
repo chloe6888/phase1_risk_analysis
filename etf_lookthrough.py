@@ -135,6 +135,7 @@ def _normalize_pattern_map(
 def import_etf_holdings(
     csv_path: Path,
     *,
+    fund_ticker: str = "DRAM",
     as_of: str,
     source_name: str = "ETF issuer CSV",
     issuer_patterns: Mapping[str, list[str]] | None = None,
@@ -149,6 +150,9 @@ def import_etf_holdings(
     non-security lines, and users should inspect the manifest warning.
     """
     path = Path(csv_path)
+    fund = str(fund_ticker).strip().upper()
+    if not fund or not re.fullmatch(r"[A-Z0-9.-]{1,20}", fund):
+        raise ValueError("fund_ticker must be a valid non-empty ticker symbol.")
     if not path.is_file():
         raise ValueError(f"ETF holdings CSV does not exist: {path}")
     try:
@@ -260,7 +264,7 @@ def import_etf_holdings(
             "review the full holdings file before relying on issuer exposure totals."
         )
     manifest: dict[str, object] = {
-        "fund_ticker": "DRAM",
+        "fund_ticker": fund,
         "as_of": asof_date.isoformat(),
         "source_name": source_name,
         "source_file": path.name,
@@ -335,23 +339,25 @@ def main() -> None:
     )
     parser.add_argument("--holdings-csv", type=Path, required=True, help="CSV downloaded from the ETF issuer.")
     parser.add_argument("--as-of", required=True, help="Date represented by the source holdings, YYYY-MM-DD.")
-    parser.add_argument("--source-name", default="Roundhill issuer holdings CSV")
+    parser.add_argument("--fund-ticker", default="DRAM", help="ETF ticker used in output filenames and manifest.")
+    parser.add_argument("--source-name", default="ETF issuer holdings CSV")
     parser.add_argument("--issuer-map-json", type=Path, help="Optional JSON mapping issuer -> matching text patterns.")
     parser.add_argument("--decimal-weights", action="store_true", help="Interpret un-suffixed weight values as fractions, e.g. 0.25 = 25%.")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT / "etf_holdings")
     args = parser.parse_args()
     holdings, issuers, manifest = import_etf_holdings(
         args.holdings_csv,
+        fund_ticker=args.fund_ticker,
         as_of=args.as_of,
         source_name=args.source_name,
         issuer_patterns=_load_issuer_map(args.issuer_map_json),
         decimal_weights=True if args.decimal_weights else None,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    dated_name = f"DRAM_holdings_{manifest['as_of']}.csv"
+    dated_name = f"{manifest['fund_ticker']}_holdings_{manifest['as_of']}.csv"
     holdings.to_csv(args.output_dir / dated_name, index=False, float_format="%.8f")
-    issuers.to_csv(args.output_dir / f"DRAM_issuer_exposures_{manifest['as_of']}.csv", index=False, float_format="%.8f")
-    (args.output_dir / f"DRAM_lookthrough_{manifest['as_of']}.json").write_text(
+    issuers.to_csv(args.output_dir / f"{manifest['fund_ticker']}_issuer_exposures_{manifest['as_of']}.csv", index=False, float_format="%.8f")
+    (args.output_dir / f"{manifest['fund_ticker']}_lookthrough_{manifest['as_of']}.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
         encoding="utf-8",
     )

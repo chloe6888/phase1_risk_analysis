@@ -15,56 +15,64 @@
       "role": "holding",
       "currency": "USD",
       "risk_group": "semiconductor_related",
-      "subgroup": "networking_custom_silicon"
+      "subgroup": "networking_custom_silicon",
+      "instrument_type": "equity"
     },
     "GOOG": {
       "name": "Alphabet Class C",
       "role": "holding",
       "currency": "USD",
       "risk_group": "internet_platform",
-      "subgroup": "search_cloud_ai"
+      "subgroup": "search_cloud_ai",
+      "instrument_type": "equity"
     },
     "DRAM": {
       "name": "Roundhill Memory ETF",
       "role": "holding",
       "currency": "USD",
       "risk_group": "semiconductor_related",
-      "subgroup": "memory"
+      "subgroup": "memory",
+      "instrument_type": "etf"
     },
     "LRCX": {
       "name": "Lam Research",
       "role": "holding",
       "currency": "USD",
       "risk_group": "semiconductor_related",
-      "subgroup": "semiconductor_equipment"
+      "subgroup": "semiconductor_equipment",
+      "instrument_type": "equity"
     },
     "MRVL": {
       "name": "Marvell Technology",
       "role": "holding",
       "currency": "USD",
       "risk_group": "semiconductor_related",
-      "subgroup": "networking_custom_silicon"
+      "subgroup": "networking_custom_silicon",
+      "instrument_type": "equity"
     },
     "MU": {
       "name": "Micron Technology",
       "role": "holding",
       "currency": "USD",
       "risk_group": "semiconductor_related",
-      "subgroup": "memory"
+      "subgroup": "memory",
+      "instrument_type": "equity"
     },
     "OKTA": {
       "name": "Okta",
       "role": "holding",
       "currency": "USD",
       "risk_group": "enterprise_security",
-      "subgroup": "identity_security_software"
+      "subgroup": "identity_security_software",
+      "instrument_type": "equity"
     },
     "QQQ": {
       "name": "Invesco QQQ Trust",
       "role": "holding",
       "currency": "USD",
       "risk_group": "broad_tech_etf",
-      "subgroup": "nasdaq_100"
+      "subgroup": "nasdaq_100",
+      "instrument_type": "etf"
     },
     "SKHY": {
       "name": "SK hynix Nasdaq ADR",
@@ -73,7 +81,8 @@
       "risk_group": "semiconductor_related",
       "subgroup": "memory",
       "regular_way_start_date": "2026-07-13",
-      "adr_ratio": "1 ADR represents 10 Korean ordinary shares"
+      "adr_ratio": "1 ADR represents 10 Korean ordinary shares",
+      "instrument_type": "equity"
     },
     "SPY": {
       "name": "SPDR S&P 500 ETF Trust",

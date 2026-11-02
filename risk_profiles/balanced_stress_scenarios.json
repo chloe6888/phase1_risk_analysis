@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "scenario_unit": "one-period simple return shock; decimal values; illustrative assumptions only",
+  "scenarios": [
+    {
+      "name": "semiconductor_ai_correction",
+      "label": "半导体与 AI 主题修正",
+      "group_shocks": {
+        "semiconductor_related": -0.2,
+        "internet_platform": -0.12,
+        "enterprise_security": -0.15,
+        "broad_tech_etf": -0.12
+      }
+    },
+    {
+      "name": "memory_cycle_downturn",
+      "label": "存储周期下行",
+      "subgroup_shocks": {
+        "memory": -0.3,
+        "semiconductor_equipment": -0.18,
+        "networking_custom_silicon": -0.15,
+        "search_cloud_ai": -0.12,
+        "identity_security_software": -0.15,
+        "nasdaq_100": -0.12
+      }
+    },
+    {
+      "name": "broad_risk_off",
+      "label": "科技股整体避险回撤",
+      "group_shocks": {
+        "semiconductor_related": -0.25,
+        "internet_platform": -0.18,
+        "enterprise_security": -0.22,
+        "broad_tech_etf": -0.18
+      }
+    }
+  ],
+  "notes": [
+    "All shocks are editable what-if assumptions, not forecasts or maximum-loss estimates.",
+    "Scenario impact is a static one-period weighted return and does not model correlations changing during a crisis.",
+    "Cash receives a zero shock; financing, options, taxes, slippage, and FX are not modeled."
+  ]
+}
