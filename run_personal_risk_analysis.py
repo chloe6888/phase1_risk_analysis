@@ -308,10 +308,26 @@ def _write_report(result: Mapping[str, Any], output_dir: Path) -> None:
         )
     lines += [
         "",
-        "## 滚动风险",
+        "## 持仓收益相关性",
         "",
-        f"- 可用窗口：{summary.get('rolling_windows_used', [])}",
-        f"- 说明：{summary.get('rolling_risk_note', '')}",
+        f"- 相关系数最低样本数要求：{summary.get('correlation_minimum_pairwise_observations', 'unknown')} 个共同日收益。",
+    ]
+    correlations = result["correlations"]
+    observation_counts = result["correlation_observations"]
+    pairs: list[tuple[str, str, float, int]] = []
+    for i, left in enumerate(correlations.columns):
+        for right in correlations.columns[i + 1:]:
+            value = correlations.loc[left, right]
+            if pd.notna(value):
+                pairs.append((
+                    str(left), str(right), float(value),
+                    int(observation_counts.loc[left, right]),
+                ))
+    for left, right, value, count in sorted(pairs, key=lambda item: abs(item[2]), reverse=True)[:10]:
+        lines.append(f"- {left} / {right}：相关系数 {value:.2f}（{count} 个共同日收益）")
+    if not pairs:
+        lines.append("共同历史不足，暂时没有达到样本数要求的相关系数。")
+    lines += [
         "",
         "## 压力测试（静态假设）",
         "",
@@ -324,6 +340,8 @@ def _write_report(result: Mapping[str, Any], output_dir: Path) -> None:
                 f"- {row.scenario_label}: 组合假设收益 {row.portfolio_return:.2%}，"
                 f"估算损益 {row.estimated_pnl:,.2f}"
             )
+    for note in summary.get("stress_scenario_note", []):
+        lines.append(f"- 情景说明：{note}")
     lines += [
         "",
         "## ETF 穿透",
