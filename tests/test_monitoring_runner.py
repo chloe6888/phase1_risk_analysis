@@ -105,6 +105,7 @@ def test_old_lock_is_not_reclaimed_while_owner_process_is_alive(tmp_path: Path) 
 
 
 def test_dead_owner_stale_lock_can_be_reclaimed(tmp_path: Path) -> None:
+    import os
     import time
 
     lock = tmp_path / ".monitoring.lock"
