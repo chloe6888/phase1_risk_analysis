@@ -272,7 +272,8 @@ def evaluate_position_decisions(
             if price_date_value is not None and not pd.isna(price_date_value):
                 try:
                     valuation_price_date = pd.Timestamp(price_date_value).date()
-                    if abs((valuation_price_date - row.price_date).days) > 1:
+                    local_price_date = pd.Timestamp(row.price_date).date()
+                    if abs((valuation_price_date - local_price_date).days) > 1:
                         data_blockers.append("估值报价日期与本地行情面板日期不一致。")
                 except (TypeError, ValueError):
                     data_blockers.append("估值报价日期格式无效。")
