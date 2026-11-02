@@ -42,6 +42,7 @@
     ├── strategy_validation.py
     ├── strategy_research.py
     ├── portfolio_optimizer.py
+    ├── factor_risk.py
     ├── paper_trading.py
     ├── risk_monitor.py
     ├── walk_forward_validation.py
@@ -61,6 +62,7 @@
     │   ├── test_strategy_validation.py
     │   ├── test_strategy_research.py
     │   ├── test_portfolio_optimizer.py
+    │   ├── test_factor_risk.py
     │   ├── test_paper_trading.py
     │   ├── test_risk_monitor.py
     │   ├── test_walk_forward_validation.py
@@ -327,6 +329,34 @@ python portfolio_optimizer.py \
 输出包括 `portfolio_optimized_weights.csv`、`portfolio_optimization_summary.json` 和 `portfolio_optimization_report.md`。报告同时比较约束下的优化组合与约束下等权组合，并输出资产风险贡献。
 
 **使用边界：** 该优化器只依据历史协方差（均值—方差模式还会使用历史平均收益）求解，不预测未来收益。历史最小方差不保证未来风险更低；分组必须互斥，每只资产只能属于一个组。当前不考虑交易成本、税费、流动性、最小交易单位和真实订单执行，也不会下单。
+
+## 组合因子风险分解
+
+新增 `factor_risk.py`，将组合历史收益对用户提供的因子代理收益做同期 OLS 回归，帮助拆解市场、半导体、成长、小盘、利率、黄金等代理因子的历史暴露和方差贡献。因子名称由输入价格面板的列名决定，不会默认假设某个因子来源。
+
+输入包括：
+- 组合资产调整收盘价面板（`--asset-prices`）；
+- 用户选择的因子代理 ETF 调整收盘价面板（`--factor-prices`）；
+- 组合权重 CSV，至少包含 `ticker,weight`；可直接使用组合优化输出的权重文件（`--weights-csv`）。
+
+示例：
+
+```bash
+python factor_risk.py \
+  --asset-prices data/raw/adjusted_close_panel.csv \
+  --factor-prices data/raw/factor_proxy_prices.csv \
+  --weights-csv outputs/portfolio_optimized_weights.csv
+```
+
+输出包括：
+- `portfolio_factor_exposures.csv`：每个因子的回归 Beta、波动率、与组合收益相关性及方差贡献；
+- `portfolio_factor_daily_returns.csv`：对齐后的组合收益、因子收益、拟合收益和残差；
+- `portfolio_factor_summary.json`：R²、年化 Alpha、因子解释波动、残差波动、共线性诊断和样本区间；
+- `portfolio_factor_report.md`：可读报告。
+
+组合收益按输入权重在每个观测收盘重新平衡，未投入比例视为零收益现金。若代理因子高度相关，程序会提示 Beta 和单因子贡献不稳定；完全共线时会拒绝拟合。负的因子方差贡献会标记为风险抵消项，而不是错误地截断成零。
+
+**重要边界：** 该分析是同期历史共变解释，不是因果模型或收益预测。用户提供的 ETF 仅是风险代理，不等同于官方 Fama-French 学术因子数据；当前组合权重也不是历史逐笔持仓重建。残差风险包含未纳入因子、个股事件、数据误差和模型设定误差。
 
 ## 纸面交易模拟
 
