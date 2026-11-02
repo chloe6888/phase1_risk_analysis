@@ -763,3 +763,61 @@ python etf_lookthrough.py --holdings-csv data/private/DRAM_holdings.csv --as-of 
 ```
 
 导入后先检查未映射权重、现金权重和完整度，再用于组合穿透；不要将 ETF 里的 MU/SKHY 敞口与直接持仓简单重复相加。
+
+## 第二阶段：个人组合统一风险报告与 ETF 穿透
+
+在第一阶段数据验收通过后，运行：
+
+```bash
+python run_personal_risk_analysis.py
+```
+
+如果你已确认账户现金余额，可在命令中显式传入：
+
+```bash
+python run_personal_risk_analysis.py --cash 2500
+```
+
+如果暂时不提供现金，程序会临时按 0 处理，并在报告中明确标记“仅按导入的九项证券计算分母”；这不代表已核实账户现金为 0。
+
+报告输出在 outputs/personal_risk/personal_portfolio_risk_report.md，并同时生成：
+- 当前持仓权重、一级风险主题和二级子主题敞口；
+- 基于调整收盘价的当前持仓风险贡献；
+- 20、60、120 日滚动年化波动率和滚动回撤（历史不足的窗口不会填成 0）；
+- 持仓收益相关性矩阵及每一对标的的共同观测数，默认至少 60 个共同日收益才显示相关系数；
+- 95% 单期历史 VaR/CVaR 和可编辑的静态压力场景；
+- 直接持股与已导入 ETF 底层发行人的合并敞口。
+
+### DRAM 与 QQQ 的 dated look-through
+
+ETF 底层敞口必须使用与披露日期对应的 holdings CSV；禁止将某日的固定比例当成永久比例。官方数据入口：
+- [Roundhill DRAM ETF 官方页面](https://www.roundhillinvestments.com/etf/dram/)
+- [Invesco QQQ Trust 官方页面及 Holdings Export](https://www.invesco.com/us/en/financial-products/etfs/invesco-qqq-trust-series-1.html)
+
+将官方持仓文件分别放入本地 data/private/，然后使用文件披露日期导入。DRAM 默认识别 MU 和 SK hynix；QQQ 使用项目内的 config/qqq_issuer_patterns.json，只映射本组合关心的发行人：
+
+```bash
+python etf_lookthrough.py --fund-ticker DRAM --holdings-csv data/private/DRAM_holdings.csv --as-of YYYY-MM-DD --source-name "Roundhill official holdings"
+
+python etf_lookthrough.py --fund-ticker QQQ --holdings-csv data/private/QQQ_holdings.csv --as-of YYYY-MM-DD --source-name "Invesco QQQ official holdings" --issuer-map-json config/qqq_issuer_patterns.json
+```
+
+然后把两份生成的 JSON 快照传给风险报告：
+
+```bash
+python run_personal_risk_analysis.py \
+  --lookthrough-snapshot outputs/etf_holdings/DRAM_lookthrough_YYYY-MM-DD.json \
+  --lookthrough-snapshot outputs/etf_holdings/QQQ_lookthrough_YYYY-MM-DD.json
+```
+
+只导入一只 ETF 时，报告会把另一只 ETF 标记为“缺少快照”；快照超过 14 个自然日会标记过期。未被 issuer map 识别的 ETF 持仓会计入 unmapped weight，不会假装已完成全 ETF 穿透。QQQ 内 GOOG/GOOGL 归为同一 Alphabet 发行人。合并后的发行人敞口是重叠口径，不能把各发行人比例再相加当成组合权重。
+
+### 风险解释边界
+
+- 历史组合收益路径使用“当前股数 × 历史复权价格”构造代理，不会复原过去的成交、股数变化、入金和出金。
+- 波动率、最大回撤、VaR/CVaR 受 SKHY ADR 上市历史较短影响；共同样本不足时，相关系数或滚动窗口会缺失并给出样本数。
+- 压力情景是用户可编辑的单期静态冲击假设，不是价格预测，也不模拟危机时相关性变化。
+- 发行人穿透只显示 issuer map 识别的标的；其他 ETF 成分会保留在 unmapped weight 中。
+- 所有输出均在本地 ignored 的 outputs/ 下；私有持仓 CSV 和 ETF 原始持仓文件不得提交到 GitHub。系统只生成研究报告，不连接券商、不执行真实订单。
+
+默认的三个平衡压力情景位于 risk_profiles/balanced_stress_scenarios.json，可根据风险预算修改。它们是研究假设，不是回撤上限或交易指令。
