@@ -87,6 +87,8 @@ def test_risk_monitor_cli_writes_snapshot_and_alerts(tmp_path: Path) -> None:
     }).to_csv(holdings_path, index=False)
     group_caps = tmp_path / "group_caps.json"
     group_caps.write_text(json.dumps({"tech": 0.5}), encoding="utf-8")
+    subgroup_caps = tmp_path / "subgroup_caps.json"
+    subgroup_caps.write_text(json.dumps({"software": 0.5}), encoding="utf-8")
     output_dir = tmp_path / "output"
     script = Path(__file__).resolve().parents[1] / "risk_monitor.py"
     result = subprocess.run(
@@ -94,12 +96,17 @@ def test_risk_monitor_cli_writes_snapshot_and_alerts(tmp_path: Path) -> None:
             sys.executable, str(script), "--holdings-csv", str(holdings_path),
             "--prices", str(price_path), "--adjusted-prices", str(adjusted_path),
             "--single-name-limit", "0.3", "--group-caps-json", str(group_caps),
+            "--subgroup-caps-json", str(subgroup_caps),
             "--max-data-age-days", "9999", "--output-dir", str(output_dir),
         ],
         check=True, capture_output=True, text=True,
     )
     snapshot = json.loads((output_dir / "risk_monitor_snapshot.json").read_text())
     assert snapshot["position_count"] == 2
+    assert "subgroup_exposures" in snapshot
+    positions = pd.read_csv(output_dir / "risk_monitor_positions.csv")
+    assert "risk_contribution_pct" in positions.columns
+    assert positions["risk_contribution_pct"].sum() == pytest.approx(100.0, abs=1e-6)
     for filename in (
         "risk_monitor_positions.csv", "risk_monitor_alerts.csv",
         "risk_monitor_daily_path.csv", "risk_monitor_snapshot.json",
