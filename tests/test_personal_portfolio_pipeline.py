@@ -169,3 +169,29 @@ def test_cli_refresh_modes_are_supported(
     monkeypatch.setattr(app, "run_pipeline", fake_pipeline)
     app.main()
     assert calls["refresh"] is expected_refresh
+
+
+def test_run_pipeline_passes_configured_short_history_symbols(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_path = tmp_path / "universe.json"
+    config = _config(config_path)
+    config["symbols"]["BBB"]["regular_way_start_date"] = "2026-01-15"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    holdings_path = tmp_path / "holdings.csv"
+    _holdings(holdings_path)
+    calls: dict[str, object] = {}
+
+    monkeypatch.setattr(app.market_data, "main", lambda **kwargs: calls.update(kwargs))
+    monkeypatch.setattr(app.acceptance, "run_acceptance", lambda *args, **kwargs: {
+        "status": "WARNING", "as_of_date": "2026-02-10",
+        "overview": {"position_count": 2, "common_return_observations": 80},
+    })
+
+    result = app.run_pipeline(
+        config_path=config_path, holdings_path=holdings_path,
+        close_prices_path=tmp_path / "close.csv",
+        adjusted_prices_path=tmp_path / "adjusted.csv",
+        output_dir=tmp_path / "reports", refresh=False,
+    )
+    assert calls["short_history_tickers"] == ["BBB"]
+    assert result["short_history_tickers"] == ["BBB"]
+    assert calls["tickers"] == ["SPY", "SOXX", "AAA", "BBB"]
