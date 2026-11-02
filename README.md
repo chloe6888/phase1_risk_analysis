@@ -362,6 +362,8 @@ python factor_risk.py \
 
 新增 `paper_trading.py`，将优化器或人工编制的目标权重转换为离线模拟订单。目标 CSV 必须包含 `ticker,weight`；初始持仓 CSV 必须包含 `ticker,shares`。默认使用 `data/raw/close_price_panel.csv` 的最近可用收盘价，卖出先于买入，模拟成交价按配置滑点向不利方向调整，手续费按成交金额计算；现金不足时按比例缩减买单，整数股模式向下取整。
 
+如果已通过行情下载流程获得带有 `Volume` 字段的 `data/raw/<TICKER>_daily.csv` 文件，还可以启用流动性约束：默认取最近 20 个有效交易日的平均成交量（ADV），将每笔模拟成交股数限制在 ADV × 最大参与率以内。未能成交的数量保留在订单记录中，不会假装全部成交。
+
 仅预览订单：
 
 ```bash
@@ -369,12 +371,17 @@ python paper_trading.py \
   --targets-csv outputs/portfolio_optimized_weights.csv \
   --holdings-csv data/private/holdings_snapshot.csv \
   --cash 5000 \
-  --prices data/raw/close_price_panel.csv
+  --prices data/raw/close_price_panel.csv \
+  --volume-dir data/raw \
+  --volume-window 20 \
+  --max-volume-age-days 7 \
+  --max-participation-rate 0.05 \
+  --market-impact-coefficient-bps 15
 ```
 
 默认不修改任何持仓账本。只有明确加入 `--commit-ledger` 时，才将模拟后的现金和股数写入本地 JSON 账本；后续运行会从账本读取模拟账户。输出包括 `paper_trade_orders.csv`、`paper_trading_holdings_after.csv` 和 `paper_trading_summary.json`。
 
-**边界：** 这不是券商接口，不会发送订单。模拟采用参考收盘价加不利滑点，不模拟盘中成交、排队、市场冲击、税费、停牌或涨跌幅限制；纸面账本也不代表券商真实持仓。
+**边界：** 这不是券商接口，不会发送订单。未提供 `--volume-dir` 时不启用 ADV 成交量上限；提供后，每笔成交量按最大参与率截断，额外滑点采用可配置的平方根参与率近似（系数不是经市场校准的参数）。它仍不模拟盘中成交、排队优先级、动态盘口、真实市场冲击曲线、税费、停牌或涨跌幅限制；纸面账本也不代表券商真实持仓。
 
 ## 组合风险监控
 

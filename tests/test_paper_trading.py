@@ -1,4 +1,4 @@
-"""Offline tests for simulated paper rebalancing."""
+"""Offline tests for simulated paper rebalancing and liquidity constraints."""
 from __future__ import annotations
 
 import json
@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -37,7 +38,7 @@ def test_buy_orders_scale_down_when_cash_is_insufficient() -> None:
     )
     buy = orders.loc[orders["side"] == "BUY"].iloc[0]
     assert summary["buy_scale_due_to_cash"] < 1
-    assert buy["status"] == "PARTIALLY_FILLED"
+    assert buy["status"] == "PARTIALLY_FILLED_CASH"
     assert after.set_index("ticker").loc["BBB", "shares"] < buy["desired_target_shares"]
     assert summary["cash_after"] >= 0
 
@@ -53,7 +54,7 @@ def test_fractional_share_mode_and_no_trade_case() -> None:
     assert summary["orders_count"] == 0
 
 
-def test_rebalance_rejects_bad_weights_prices_and_cash() -> None:
+def test_rebalance_rejects_bad_weights_prices_cash_and_participation() -> None:
     holdings = pd.DataFrame({"ticker": ["AAA"], "shares": [1]})
     with pytest.raises(ValueError, match="no more than 100"):
         app.simulate_rebalance(
@@ -63,6 +64,99 @@ def test_rebalance_rejects_bad_weights_prices_and_cash() -> None:
         app.simulate_rebalance(holdings, {"BBB": 0.5}, {"AAA": 100}, cash=0)
     with pytest.raises(ValueError, match="cash"):
         app.simulate_rebalance(holdings, {"AAA": 0.5}, {"AAA": 100}, cash=-1)
+    with pytest.raises(ValueError, match="max_participation_rate"):
+        app.simulate_rebalance(
+            holdings, {"AAA": 0.5}, {"AAA": 100}, cash=100,
+            max_participation_rate=0,
+        )
+
+
+def test_adv_limits_sell_fill_and_records_unfilled_quantity() -> None:
+    holdings = pd.DataFrame({"ticker": ["AAA"], "shares": [100]})
+    orders, after, summary = app.simulate_rebalance(
+        holdings, {"AAA": 0.0}, {"AAA": 50.0},
+        cash=0.0, transaction_cost_bps=0, slippage_bps=0,
+        average_daily_volume={"AAA": 500.0},
+        max_participation_rate=0.10,
+    )
+    sell = orders.iloc[0]
+    assert sell["side"] == "SELL"
+    assert sell["requested_shares"] == pytest.approx(100)
+    assert sell["filled_shares"] == pytest.approx(50)
+    assert sell["unfilled_shares"] == pytest.approx(50)
+    assert sell["status"] == "PARTIALLY_FILLED_LIQUIDITY"
+    assert sell["participation_rate"] == pytest.approx(0.10)
+    assert after.iloc[0]["shares"] == pytest.approx(50)
+    assert summary["liquidity_limited_orders_count"] == 1
+    assert summary["total_sell_unfilled_shares"] == pytest.approx(50)
+
+
+def test_adv_limits_buy_fill_and_applies_square_root_market_impact() -> None:
+    holdings = pd.DataFrame(columns=["ticker", "shares"])
+    orders, after, summary = app.simulate_rebalance(
+        holdings, {"AAA": 1.0}, {"AAA": 10.0},
+        cash=10_000.0, transaction_cost_bps=0, slippage_bps=0,
+        average_daily_volume={"AAA": 100.0},
+        max_participation_rate=0.05,
+        market_impact_coefficient_bps=20.0,
+    )
+    buy = orders.iloc[0]
+    expected_impact = 20.0 * np.sqrt(5.0 / 100.0)
+    assert buy["requested_shares"] == pytest.approx(1000)
+    assert buy["filled_shares"] == pytest.approx(5)
+    assert buy["unfilled_shares"] == pytest.approx(995)
+    assert buy["status"] == "PARTIALLY_FILLED_LIQUIDITY"
+    assert buy["market_impact_bps"] == pytest.approx(expected_impact)
+    assert buy["effective_slippage_bps"] == pytest.approx(expected_impact)
+    assert buy["simulated_execution_price"] > buy["reference_price"]
+    assert buy["participation_rate"] == pytest.approx(0.05)
+    assert after.iloc[0]["shares"] == pytest.approx(5)
+    assert summary["total_buy_unfilled_shares"] == pytest.approx(995)
+    assert summary["max_observed_participation_rate"] == pytest.approx(0.05)
+
+
+def test_whole_share_order_can_remain_unfilled_when_adv_capacity_is_fractional() -> None:
+    holdings = pd.DataFrame({"ticker": ["AAA"], "shares": [5]})
+    orders, after, summary = app.simulate_rebalance(
+        holdings, {"AAA": 0.0}, {"AAA": 10.0},
+        cash=0.0, transaction_cost_bps=0, slippage_bps=0,
+        average_daily_volume={"AAA": 5.0},
+        max_participation_rate=0.10,
+    )
+    assert orders.iloc[0]["filled_shares"] == 0
+    assert orders.iloc[0]["unfilled_shares"] == 5
+    assert orders.iloc[0]["status"] == "UNFILLED_NO_LIQUIDITY"
+    assert after.iloc[0]["shares"] == 5
+    assert summary["unfilled_orders_count"] == 1
+
+
+def test_adv_is_loaded_from_recent_local_volume_files(tmp_path: Path) -> None:
+    dates = pd.bdate_range(end=pd.Timestamp.now().normalize(), periods=8)
+    pd.DataFrame({
+        "Date": dates,
+        "Volume": [100, 200, 300, 400, 500, 600, 700, 800],
+    }).to_csv(tmp_path / "AAA_daily.csv", index=False)
+    adv, metadata = app.load_average_daily_volume(
+        tmp_path, ["AAA"], window=5, max_data_age_calendar_days=7,
+        minimum_observations=5,
+    )
+    assert adv["AAA"] == pytest.approx(600)
+    assert metadata["AAA"]["observations"] == 5
+    assert metadata["AAA"]["age_calendar_days"] == 0
+
+
+def test_adv_loader_rejects_missing_file_and_stale_data(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Missing volume history"):
+        app.load_average_daily_volume(tmp_path, ["MISSING"])
+    dates = pd.bdate_range("2020-01-01", periods=8)
+    pd.DataFrame({"Date": dates, "Volume": [100] * len(dates)}).to_csv(
+        tmp_path / "AAA_daily.csv", index=False
+    )
+    with pytest.raises(ValueError, match="is .* calendar days old"):
+        app.load_average_daily_volume(
+            tmp_path, ["AAA"], window=5, max_data_age_calendar_days=7,
+            minimum_observations=5,
+        )
 
 
 def test_paper_ledger_is_previewed_unless_explicitly_written(tmp_path: Path) -> None:
@@ -83,10 +177,19 @@ def test_paper_ledger_is_previewed_unless_explicitly_written(tmp_path: Path) -> 
 
 
 def test_cli_writes_preview_and_commits_only_when_requested(tmp_path: Path) -> None:
-    index = pd.bdate_range("2025-01-01", periods=20)
-    prices = pd.DataFrame({"AAA": [100 + i for i in range(20)], "BBB": [50 + i for i in range(20)]}, index=index)
+    index = pd.bdate_range(end=pd.Timestamp.now().normalize(), periods=20)
+    prices = pd.DataFrame({
+        "AAA": [100 + i for i in range(20)],
+        "BBB": [50 + i for i in range(20)],
+    }, index=index)
     price_file = tmp_path / "prices.csv"
     prices.to_csv(price_file)
+    volume_dir = tmp_path / "volume"
+    volume_dir.mkdir()
+    for ticker in ["AAA", "BBB"]:
+        pd.DataFrame({"Date": index, "Volume": [1000] * len(index)}).to_csv(
+            volume_dir / f"{ticker}_daily.csv", index=False
+        )
     targets = tmp_path / "targets.csv"
     pd.DataFrame({"ticker": ["AAA", "BBB"], "weight": [0.3, 0.3]}).to_csv(targets, index=False)
     holdings = tmp_path / "holdings.csv"
@@ -97,12 +200,17 @@ def test_cli_writes_preview_and_commits_only_when_requested(tmp_path: Path) -> N
     command = [
         sys.executable, str(script), "--prices", str(price_file),
         "--targets-csv", str(targets), "--holdings-csv", str(holdings),
-        "--cash", "1000", "--ledger-file", str(ledger), "--output-dir", str(output),
+        "--cash", "1000", "--ledger-file", str(ledger),
+        "--volume-dir", str(volume_dir), "--max-participation-rate", "0.05",
+        "--market-impact-coefficient-bps", "15",
+        "--output-dir", str(output),
     ]
     subprocess.run(command, check=True, capture_output=True, text=True)
     assert not ledger.exists()
     summary = json.loads((output / "paper_trading_summary.json").read_text())
     assert summary["ledger_committed"] is False
+    assert "AAA" in summary["average_daily_volume"]
+    assert summary["max_participation_rate"] == pytest.approx(0.05)
     subprocess.run(command + ["--commit-ledger"], check=True, capture_output=True, text=True)
     assert ledger.exists()
     state = json.loads(ledger.read_text())
