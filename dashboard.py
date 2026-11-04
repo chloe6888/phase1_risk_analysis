@@ -360,6 +360,20 @@ VALUE_LABELS = {
     "OK": "通过",
     "SKIP": "跳过",
     "SKIPPED": "数据不足，已跳过",
+    "PASS": "通过",
+    "WARNING": "有警告",
+    "BLOCKED": "已阻断",
+    "FAILED": "失败",
+    "RUNNING": "运行中",
+    "SUCCEEDED": "已完成",
+    "PENDING": "等待运行",
+    "NOT_RUN": "尚未运行",
+    "pass": "通过",
+    "warning": "有警告",
+    "blocked": "已阻断",
+    "failed": "失败",
+    "running": "运行中",
+    "succeeded": "已完成",
     "daily": "每日",
     "weekly": "每周",
     "monthly": "每月",
@@ -556,7 +570,7 @@ def _display_frame(frame: pd.DataFrame | None) -> pd.DataFrame | None:
         return None
     result = frame.copy()
     result = result.rename(columns={key: value for key, value in COLUMN_LABELS.items() if key in result.columns})
-    for column in ("方案", "建议动作", "验证状态", "加仓条件检查", "趋势状态", "选中调仓频率", "参数选择指标"):
+    for column in ("方案", "建议动作", "状态", "验证状态", "加仓条件检查", "趋势状态", "选中调仓频率", "参数选择指标"):
         if column in result.columns:
             result[column] = result[column].replace(VALUE_LABELS)
     if "判断依据" in result.columns:
