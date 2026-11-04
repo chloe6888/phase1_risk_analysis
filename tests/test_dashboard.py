@@ -42,6 +42,15 @@ def test_output_status_checks_key_artifacts(tmp_path: Path) -> None:
     assert len(status) >= 8
 
 
+def test_dashboard_theme_is_responsive_and_chinese_first() -> None:
+    from dashboard_theme import DASHBOARD_CSS
+
+    assert ".st-key-dashboard_hero" in DASHBOARD_CSS
+    assert "PingFang SC" in DASHBOARD_CSS
+    assert "@media (max-width: 900px)" in DASHBOARD_CSS
+    assert "中文操作界面" in (Path(app.ROOT) / "dashboard_theme.py").read_text(encoding="utf-8")
+
+
 def test_make_pipeline_command_builds_argv_without_shell_interpolation() -> None:
     command = app.make_pipeline_command(
         weights="GOOGL=0.6,SPY=0.4",
