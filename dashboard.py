@@ -15,6 +15,7 @@ from holdings_manager import load_holdings, summarize_holdings, risk_guardrail_a
 from task_manager import (
     TaskAlreadyRunning, active_output_dir, get_current_task, get_task_log, start_task,
 )
+from dashboard_theme import apply_dashboard_theme, render_dashboard_header
 
 try:
     import streamlit as st
@@ -359,6 +360,20 @@ VALUE_LABELS = {
     "OK": "通过",
     "SKIP": "跳过",
     "SKIPPED": "数据不足，已跳过",
+    "PASS": "通过",
+    "WARNING": "有警告",
+    "BLOCKED": "已阻断",
+    "FAILED": "失败",
+    "RUNNING": "运行中",
+    "SUCCEEDED": "已完成",
+    "PENDING": "等待运行",
+    "NOT_RUN": "尚未运行",
+    "pass": "通过",
+    "warning": "有警告",
+    "blocked": "已阻断",
+    "failed": "失败",
+    "running": "运行中",
+    "succeeded": "已完成",
     "daily": "每日",
     "weekly": "每周",
     "monthly": "每月",
@@ -555,7 +570,7 @@ def _display_frame(frame: pd.DataFrame | None) -> pd.DataFrame | None:
         return None
     result = frame.copy()
     result = result.rename(columns={key: value for key, value in COLUMN_LABELS.items() if key in result.columns})
-    for column in ("方案", "建议动作", "验证状态", "加仓条件检查", "趋势状态", "选中调仓频率", "参数选择指标"):
+    for column in ("方案", "建议动作", "状态", "验证状态", "加仓条件检查", "趋势状态", "选中调仓频率", "参数选择指标"):
         if column in result.columns:
             result[column] = result[column].replace(VALUE_LABELS)
     if "判断依据" in result.columns:
@@ -866,21 +881,11 @@ def main() -> None:
             "未安装网页仪表盘依赖。请运行：python -m pip install -r requirements-dashboard.txt"
         )
     st.set_page_config(page_title="个人投资研究工作台", page_icon="📈", layout="wide")
-    st.markdown(
-        """
-        <style>
-        .block-container {max-width: 1440px; padding-top: 1.6rem; padding-bottom: 3rem;}
-        [data-testid="stMetric"] {border: 1px solid rgba(128,128,128,.22); padding: .8rem 1rem; border-radius: .65rem;}
-        [data-testid="stTabs"] button {font-size: 1rem;}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.title("个人投资研究工作台")
-    st.caption("以中文呈现持仓、风险与策略研究结果。所有数据用于辅助分析，不连接券商、不执行真实交易。")
+    apply_dashboard_theme(st)
+    render_dashboard_header(st)
     color_preference = st.sidebar.radio(
-        "收益数字颜色",
-        options=["美股习惯：涨绿跌红", "A 股习惯：涨红跌绿"],
+        "涨跌颜色规则",
+        options=["美股配色：上涨绿色，下跌红色", "A 股配色：上涨红色，下跌绿色"],
         index=0,
         help="只影响指标卡中正负收益差值的颜色；曲线颜色用于区分系列，不表示涨跌方向。",
     )
