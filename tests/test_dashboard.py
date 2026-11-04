@@ -42,6 +42,24 @@ def test_output_status_checks_key_artifacts(tmp_path: Path) -> None:
     assert len(status) >= 8
 
 
+def test_personal_suite_output_status_tracks_suite_specific_artifacts(tmp_path: Path) -> None:
+    status = app.personal_suite_output_status(tmp_path)
+    assert status["personal_suite/personal_portfolio_suite.md"] is False
+    assert status["valuation/valuation_report.md"] is False
+
+    report = tmp_path / "personal_suite" / "personal_portfolio_suite.md"
+    report.parent.mkdir(parents=True)
+    report.write_text("# simulated suite result", encoding="utf-8")
+    valuation = tmp_path / "valuation" / "valuation_report.md"
+    valuation.parent.mkdir(parents=True)
+    valuation.write_text("# simulated valuation result", encoding="utf-8")
+
+    status = app.personal_suite_output_status(tmp_path)
+    assert status["personal_suite/personal_portfolio_suite.md"] is True
+    assert status["valuation/valuation_report.md"] is True
+    assert status["acceptance/real_data_acceptance.md"] is False
+
+
 def test_dashboard_theme_is_responsive_and_chinese_first() -> None:
     from dashboard_theme import DASHBOARD_CSS
 

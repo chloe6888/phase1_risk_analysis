@@ -399,6 +399,25 @@ FILE_LABELS = {
     "research_report.md": "综合研究报告",
 }
 
+PERSONAL_SUITE_FILE_LABELS = {
+    "personal_suite/personal_portfolio_suite.md": "个人组合研究总览与阶段结论",
+    "acceptance/real_data_acceptance.md": "真实持仓与行情验收报告",
+    "personal_risk/personal_portfolio_risk_report.md": "个人组合风险报告",
+    "allocation_comparison/personal_allocation_comparison.md": "资产配置比较报告",
+    "valuation/valuation_report.md": "个股估值报告",
+    "position_decisions/position_decision_review.md": "加减仓规则复核报告",
+}
+
+
+def personal_suite_output_status(output_root: str | Path | None = None) -> dict[str, bool]:
+    """Return artifact availability for the separate one-click personal suite."""
+    root = Path(output_root) if output_root is not None else OUTPUT_DIR
+    return {
+        relative_path: (root / relative_path).is_file()
+        for relative_path in PERSONAL_SUITE_FILE_LABELS
+    }
+
+
 
 def _pct(value: Any) -> str:
     if value is None or pd.isna(value):
@@ -1037,7 +1056,19 @@ def main() -> None:
     risk_contributions = read_csv(output_dir / "portfolio_risk_contributions.csv")
     latest_holdings = read_csv(output_dir / "holdings_valuation.csv")
     valuation_output_dir = active_output_dir(ROOT, task_type="valuation")
-    valuation_summary = read_csv(valuation_output_dir / "valuation_summary.csv")
+    valuation_suite_output_dir = OUTPUT_DIR / "valuation"
+    valuation_summary_path = next(
+        (
+            candidate
+            for candidate in (
+                valuation_output_dir / "valuation_summary.csv",
+                valuation_suite_output_dir / "valuation_summary.csv",
+            )
+            if candidate.is_file()
+        ),
+        None,
+    )
+    valuation_summary = read_csv(valuation_summary_path) if valuation_summary_path else None
 
     if data_meta:
         dates = data_meta.get("data_last_dates", {})
@@ -1047,7 +1078,15 @@ def main() -> None:
             st.write(f"分析时间（UTC）：{data_meta.get('run_at_utc', '未知')} · 数据来源：{data_meta.get('source', '未记录')}")
             st.caption(f"各标的最后数据日期：{latest_dates or '暂无记录'}")
     else:
-        st.info("当前还没有研究结果。请在上方导入持仓或填写组合权重，然后点击“开始研究”。首次下载行情需要网络。")
+        personal_suite_report = OUTPUT_DIR / "personal_suite" / "personal_portfolio_suite.md"
+        if personal_suite_report.is_file():
+            st.info(
+                "已生成“一键个人组合研究”报告。它与“开始研究”的策略回测任务分开保存；"
+                "策略回测/参数验证结果尚未运行时，本页不会显示那一类结果。"
+                "请查看“账户概览”或“研究报告与文件”中的完整组合研究报告。"
+            )
+        else:
+            st.info("当前还没有研究结果。请在上方导入持仓或填写组合权重，然后点击“开始研究”。首次下载行情需要网络。")
 
     imported_positions = None
     imported_summary = None
@@ -2072,6 +2111,26 @@ def main() -> None:
     with files_tab:
         st.subheader("研究报告与结果文件")
         st.caption("本页回答：本次研究用了哪些数据、生成了哪些结果文件？结论有哪些重要限制需要在行动前核对？")
+        st.markdown("### 一键个人组合研究结果")
+        st.caption("此处汇总“账户概览 → 运行完整组合研究”的文件。它与下方“开始研究”的策略回测任务分别保存，不能只看其中一张清单。")
+        personal_suite_status = personal_suite_output_status()
+        personal_suite_table = pd.DataFrame([
+            {
+                "文件用途": PERSONAL_SUITE_FILE_LABELS[relative_path],
+                "生成状态": "已生成" if exists else "尚未生成",
+            }
+            for relative_path, exists in personal_suite_status.items()
+        ])
+        st.dataframe(personal_suite_table, hide_index=True, use_container_width=True)
+        personal_suite_report_path = OUTPUT_DIR / "personal_suite" / "personal_portfolio_suite.md"
+        if personal_suite_report_path.is_file():
+            st.markdown("### 一键个人组合研究结论")
+            st.markdown(personal_suite_report_path.read_text(encoding="utf-8"))
+        else:
+            st.info("尚未运行完整个人组合研究。请先在“账户概览”点击“运行完整组合研究”。")
+
+        st.markdown("### 策略研究任务结果文件")
+        st.caption("下表只统计“开始研究”生成的行情、风险、回测和滚动样本外验证文件；它不代表上方完整组合研究的生成状态。")
         output_table = pd.DataFrame([
             {"文件用途": FILE_LABELS.get(name, name), "生成状态": "已生成" if exists else "尚未生成"}
             for name, exists in status.items()
@@ -2087,7 +2146,12 @@ def main() -> None:
             st.code(str(output_dir), language="text")
             st.caption("个人持仓原始文件保存在 data/private/，研究结果保存在 outputs/ 或对应的独立运行目录。")
         valuation_files = pd.DataFrame([
-            {"文件用途": label, "生成状态": "已生成" if (valuation_output_dir / name).is_file() else "尚未生成"}
+            {
+                "文件用途": label,
+                "生成状态": "已生成"
+                if (valuation_output_dir / name).is_file() or (valuation_suite_output_dir / name).is_file()
+                else "尚未生成",
+            }
             for name, label in {
                 "valuation_summary.csv": "个股估值汇总",
                 "valuation_report.md": "个股估值报告",
