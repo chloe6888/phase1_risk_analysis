@@ -272,7 +272,7 @@ def render_dashboard_header(st: Any) -> None:
     """Render a branded title area while keeping the page title accessible to Streamlit."""
     with st.container(key="dashboard_hero"):
         st.markdown(
-            '<div class="quant-hero-eyebrow">PERSONAL QUANT · 投资研究控制台</div>',
+            '<div class="quant-hero-eyebrow">个人投资研究 · 数据驱动的组合管理</div>',
             unsafe_allow_html=True,
         )
         st.title("个人投资研究工作台")
