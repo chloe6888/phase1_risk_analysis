@@ -399,6 +399,25 @@ FILE_LABELS = {
     "research_report.md": "综合研究报告",
 }
 
+PERSONAL_SUITE_FILE_LABELS = {
+    "personal_suite/personal_portfolio_suite.md": "个人组合研究总览与阶段结论",
+    "acceptance/real_data_acceptance.md": "真实持仓与行情验收报告",
+    "personal_risk/personal_portfolio_risk_report.md": "个人组合风险报告",
+    "allocation_comparison/personal_allocation_comparison.md": "资产配置比较报告",
+    "valuation/valuation_report.md": "个股估值报告",
+    "position_decisions/position_decision_review.md": "加减仓规则复核报告",
+}
+
+
+def personal_suite_output_status(output_root: str | Path | None = None) -> dict[str, bool]:
+    """Return artifact availability for the separate one-click personal suite."""
+    root = Path(output_root) if output_root is not None else OUTPUT_DIR
+    return {
+        relative_path: (root / relative_path).is_file()
+        for relative_path in PERSONAL_SUITE_FILE_LABELS
+    }
+
+
 
 def _pct(value: Any) -> str:
     if value is None or pd.isna(value):
@@ -2094,20 +2113,13 @@ def main() -> None:
         st.caption("本页回答：本次研究用了哪些数据、生成了哪些结果文件？结论有哪些重要限制需要在行动前核对？")
         st.markdown("### 一键个人组合研究结果")
         st.caption("此处汇总“账户概览 → 运行完整组合研究”的文件。它与下方“开始研究”的策略回测任务分别保存，不能只看其中一张清单。")
-        personal_suite_file_labels = {
-            "personal_suite/personal_portfolio_suite.md": "个人组合研究总览与阶段结论",
-            "acceptance/real_data_acceptance.md": "真实持仓与行情验收报告",
-            "personal_risk/personal_portfolio_risk_report.md": "个人组合风险报告",
-            "allocation_comparison/personal_allocation_comparison.md": "资产配置比较报告",
-            "valuation/valuation_report.md": "个股估值报告",
-            "position_decisions/position_decision_review.md": "加减仓规则复核报告",
-        }
+        personal_suite_status = personal_suite_output_status()
         personal_suite_table = pd.DataFrame([
             {
-                "文件用途": label,
-                "生成状态": "已生成" if (OUTPUT_DIR / relative_path).is_file() else "尚未生成",
+                "文件用途": PERSONAL_SUITE_FILE_LABELS[relative_path],
+                "生成状态": "已生成" if exists else "尚未生成",
             }
-            for relative_path, label in personal_suite_file_labels.items()
+            for relative_path, exists in personal_suite_status.items()
         ])
         st.dataframe(personal_suite_table, hide_index=True, use_container_width=True)
         personal_suite_report_path = OUTPUT_DIR / "personal_suite" / "personal_portfolio_suite.md"
